@@ -1,0 +1,92 @@
+services:
+  - type: web
+    name: anomaly-userservice
+    runtime: docker
+    plan: free
+    rootDir: userservice
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /actuator/health
+    envVars:
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        value: "4000"
+      - key: DB_NAME
+        value: user_service_db
+      - key: DB_USERNAME
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_SSL_MODE
+        value: VERIFY_IDENTITY
+      - key: ORDER_SERVICE_URL
+        value: https://anomaly-orderservice.onrender.com
+
+  - type: web
+    name: anomaly-productservice
+    runtime: docker
+    plan: free
+    rootDir: productservice/productservice
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /actuator/health
+    envVars:
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        value: "4000"
+      - key: DB_NAME
+        value: product_db
+      - key: DB_USERNAME
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_SSL_MODE
+        value: VERIFY_IDENTITY
+
+  - type: web
+    name: anomaly-orderservice
+    runtime: docker
+    plan: free
+    rootDir: orderservice
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /actuator/health
+    envVars:
+      - key: DB_HOST
+        sync: false
+      - key: DB_PORT
+        value: "4000"
+      - key: DB_NAME
+        value: order_db
+      - key: DB_USERNAME
+        sync: false
+      - key: DB_PASSWORD
+        sync: false
+      - key: DB_SSL_MODE
+        value: VERIFY_IDENTITY
+      - key: USER_SERVICE_URL
+        value: https://anomaly-userservice.onrender.com
+      - key: PRODUCT_SERVICE_URL
+        value: https://anomaly-productservice.onrender.com
+
+  - type: web
+    name: anomaly-dashboard
+    runtime: docker
+    plan: free
+    rootDir: metric-collector
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /_stcore/health
+    envVars:
+      - key: USER_SERVICE_URL
+        value: https://anomaly-userservice.onrender.com
+      - key: PRODUCT_SERVICE_URL
+        value: https://anomaly-productservice.onrender.com
+      - key: ORDER_SERVICE_URL
+        value: https://anomaly-orderservice.onrender.com
+      - key: USER_SERVICE_HOST
+        value: anomaly-userservice.onrender.com
+      - key: PRODUCT_SERVICE_HOST
+        value: anomaly-productservice.onrender.com
+      - key: ORDER_SERVICE_HOST
+        value: anomaly-orderservice.onrender.com
+      - key: PROMETHEUS_URL
+        value: http://127.0.0.1:9090
