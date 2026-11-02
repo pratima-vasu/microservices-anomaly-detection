@@ -1,0 +1,578 @@
+import argparse
+import math
+import os
+import sys
+import time
+from datetime import datetime
+from pathlib import Path
+
+import joblib
+import pandas as pd
+import requests
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
+from data_preprocessing.feature_engineering import build_model_input
+
+
+# --------------------------------------------------
+# CONFIGURATION
+# --------------------------------------------------
+
+PROMETHEUS_URL = os.getenv("PROMETHEUS_URL", "http://localhost:9090").rstrip("/")
+
+HERE = Path(__file__).resolve().parent
+MODEL_FILE = PROJECT_ROOT / "isolation_forest_model.pkl"
+CSV_FILE = HERE / "test_dataset.csv"
+
+COLLECTION_INTERVAL = 5
+
+SERVICES = [
+    "user-service",
+    "product-service",
+    "order-service",
+]
+
+FAULT_STATUS_URLS = {
+    "user-service": os.getenv("USER_SERVICE_URL", "http://localhost:8082").rstrip("/") + "/faults/status",
+    "product-service": os.getenv("PRODUCT_SERVICE_URL", "http://localhost:8083").rstrip("/") + "/faults/status",
+    "order-service": os.getenv("ORDER_SERVICE_URL", "http://localhost:8084").rstrip("/") + "/faults/status",
+}
+
+SUPPORTED_FAULTS = {
+    "RESPONSE_TIME",
+    "ERROR_RATE",
+    "CPU",
+    "THREAD_COUNT",
+}
+
+METRIC_COLUMNS = [
+    "request_rate",
+    "error_count",
+    "thread_count",
+    "cpu_usage",
+    "response_time",
+]
+
+OUTPUT_COLUMNS = [
+    "timestamp",
+    "service",
+    *METRIC_COLUMNS,
+    "actual_label",
+    "fault_type",
+    "prediction",
+    "anomaly_score",
+]
+
+
+# --------------------------------------------------
+# PROMETHEUS QUERIES
+# --------------------------------------------------
+
+QUERIES = {
+    "request_rate": """
+        sum by (job) (
+            rate(http_server_requests_seconds_count{
+                uri!~"/actuator.*"
+            }[1m])
+        )
+        or on (job)
+        (
+            0 * max by (job) (up)
+        )
+    """,
+
+    "error_count": """
+        sum by (job) (
+            increase(http_server_requests_seconds_count{
+                uri!~"/actuator.*",
+                status=~"4..|5.."
+            }[1m])
+        )
+        or on (job)
+        (
+            0 * max by (job) (up)
+        )
+    """,
+
+    "thread_count": """
+        sum by (job) (
+            jvm_threads_live_threads
+        )
+    """,
+
+    "cpu_usage": """
+        process_cpu_usage
+    """,
+
+    "response_time": """
+        sum by (job) (
+            rate(http_server_requests_seconds_sum{
+                uri!~"/actuator.*"
+            }[1m])
+        )
+        /
+        sum by (job) (
+            rate(http_server_requests_seconds_count{
+                uri!~"/actuator.*"
+            }[1m])
+        )
+    """,
+}
+
+
+# --------------------------------------------------
+# PROMETHEUS FETCHING
+# --------------------------------------------------
+
+def query_prometheus(query):
+    response = requests.get(
+        f"{PROMETHEUS_URL}/api/v1/query",
+        params={"query": query},
+        timeout=10,
+    )
+
+    response.raise_for_status()
+    result = response.json()
+
+    if result.get("status") != "success":
+        raise RuntimeError(
+            f"Prometheus query failed: {result}"
+        )
+
+    return result["data"]["result"]
+
+
+def get_metric_values(query):
+    values = {}
+
+    for result in query_prometheus(query):
+        service = result.get("metric", {}).get("job")
+
+        if service not in SERVICES:
+            continue
+
+        try:
+            value = float(result["value"][1])
+        except (KeyError, TypeError, ValueError, IndexError):
+            continue
+
+        if math.isfinite(value):
+            values[service] = value
+
+    return values
+
+
+# --------------------------------------------------
+# FAULT STATUS AND ACTUAL LABEL
+# --------------------------------------------------
+
+def get_fault_status(service):
+    """
+    Returns:
+        ("NONE", "NORMAL")          when no fault is active
+        (fault_type, "ANOMALY")     when a known fault is active
+        ("UNKNOWN", None)           when status cannot be determined
+
+    actual_label represents fault-injection state.
+    It is independent of the Isolation Forest prediction.
+    """
+
+    try:
+        response = requests.get(
+            FAULT_STATUS_URLS[service],
+            timeout=5,
+        )
+        response.raise_for_status()
+
+        try:
+            body = response.json()
+
+            if isinstance(body, dict):
+                status_value = body.get(
+                    "status",
+                    body.get(
+                        "faultStatus",
+                        body.get(
+                            "type",
+                            body.get("active", ""),
+                        ),
+                    ),
+                )
+            else:
+                status_value = body
+
+        except ValueError:
+            status_value = response.text
+
+        status = str(status_value).strip().upper()
+
+        # Handle responses such as:
+        # "Fault enabled: THREAD_COUNT"
+        # "THREAD_COUNT"
+
+        for fault in SUPPORTED_FAULTS:
+            if fault in status:
+                return fault, "ANOMALY"
+
+        # Handle responses indicating no active fault.
+        if status in {
+            "NONE",
+            "NORMAL",
+            "DISABLED",
+            "FALSE",
+            "INACTIVE",
+            "0",
+            "",
+        }:
+            return "NONE", "NORMAL"
+
+        # Handle generic active status if the API
+        # does not provide a specific fault type.
+        if status in {
+            "ACTIVE",
+            "ENABLED",
+            "FAULT",
+            "TRUE",
+            "1",
+        }:
+            return "ACTIVE", "ANOMALY"
+
+        print(
+            f"WARNING: Unknown fault status for "
+            f"{service}: {status!r}"
+        )
+
+        return "UNKNOWN", None
+
+    except (requests.RequestException, ValueError) as error:
+        print(
+            f"WARNING: Cannot read fault status "
+            f"for {service}: {error}"
+        )
+
+        return "UNKNOWN", None
+
+
+# --------------------------------------------------
+# LOAD SAVED MODEL
+# --------------------------------------------------
+
+def load_model():
+    if not MODEL_FILE.exists():
+        raise FileNotFoundError(
+            f"Model not found: {MODEL_FILE}\n"
+            "Keep isolation_forest_model.pkl in the "
+            "parent metric-collector folder."
+        )
+
+    saved = joblib.load(MODEL_FILE)
+
+    if (
+        not isinstance(saved, dict)
+        or "model" not in saved
+        or "features" not in saved
+    ):
+        raise ValueError(
+            "Unexpected model format. Expected a dictionary "
+            "containing 'model' and 'features'."
+        )
+
+    model = saved["model"]
+    expected_features = list(saved["features"])
+
+    print("Model loaded successfully.")
+    print("Expected features:", expected_features)
+
+    return model, expected_features
+
+
+# --------------------------------------------------
+# COLLECT METRICS AND PREDICT
+# --------------------------------------------------
+
+def collect_once(model, expected_features):
+    timestamp = datetime.now().astimezone().isoformat(
+        timespec="milliseconds"
+    )
+
+    metrics = {
+        name: get_metric_values(query)
+        for name, query in QUERIES.items()
+    }
+
+    rows = []
+
+    for service in SERVICES:
+
+        request_rate = metrics["request_rate"].get(service)
+
+        if request_rate is None:
+            print(
+                f"WARNING: Skipping {service}; "
+                "request_rate unavailable."
+            )
+            continue
+
+        error_count = metrics["error_count"].get(service)
+        response_time = metrics["response_time"].get(service)
+
+        # Match the training convention for idle services.
+        if request_rate == 0:
+            if error_count is None:
+                error_count = 0.0
+
+            if response_time is None:
+                response_time = 0.0
+
+        missing = []
+
+        if error_count is None:
+            missing.append("error_count")
+
+        if response_time is None:
+            missing.append("response_time")
+
+        for metric_name in (
+            "thread_count",
+            "cpu_usage",
+        ):
+            if service not in metrics[metric_name]:
+                missing.append(metric_name)
+
+        if missing:
+            print(
+                f"WARNING: Skipping {service}; "
+                f"metrics unavailable: {', '.join(missing)}"
+            )
+            continue
+
+        # One complete observation for this service.
+        observation = {
+            "timestamp": timestamp,
+            "service": service,
+            "request_rate": round(request_rate, 4),
+            "error_count": round(error_count, 4),
+            "thread_count": round(
+                metrics["thread_count"][service], 2
+            ),
+            "cpu_usage": round(
+                metrics["cpu_usage"][service] * 100, 4
+            ),
+            "response_time": round(response_time, 6),
+        }
+
+        # Model prediction uses the saved feature layout.
+        try:
+            model_input = build_model_input(
+                observation,
+                expected_features,
+            )
+
+            raw_prediction = int(
+                model.predict(model_input)[0]
+            )
+
+            # Isolation Forest: -1 = anomaly, +1 = normal.
+            prediction = (
+                "ANOMALY"
+                if raw_prediction == -1
+                else "NORMAL"
+            )
+
+            anomaly_score = float(
+                model.decision_function(model_input)[0]
+            )
+
+        except Exception as error:
+            print(
+                f"ERROR: Prediction failed for "
+                f"{service}: {error}"
+            )
+            continue
+
+        # Read actual fault state independently.
+        fault_type, actual_label = get_fault_status(service)
+
+        output_row = {
+            **observation,
+            "actual_label": actual_label,
+            "fault_type": fault_type,
+            "prediction": prediction,
+            "anomaly_score": round(anomaly_score, 6),
+        }
+
+        rows.append(output_row)
+
+        print(
+            f"{timestamp} | {service} | "
+            f"Actual: {actual_label or 'UNKNOWN'} | "
+            f"Fault: {fault_type} | "
+            f"Prediction: {prediction} | "
+            f"Anomaly score: {output_row['anomaly_score']} | "
+            f"Request rate: {observation['request_rate']} | "
+            f"Errors: {observation['error_count']} | "
+            f"CPU: {observation['cpu_usage']}% | "
+            f"Response time: {observation['response_time']} sec"
+        )
+
+    if rows:
+        dataframe = pd.DataFrame(
+            rows,
+            columns=OUTPUT_COLUMNS,
+        )
+
+        file_exists = (
+            CSV_FILE.exists()
+            and CSV_FILE.stat().st_size > 0
+        )
+
+        dataframe.to_csv(
+            CSV_FILE,
+            mode="a" if file_exists else "w",
+            header=not file_exists,
+            index=False,
+        )
+
+        print(
+            f"Saved {len(rows)} prediction rows to: "
+            f"{CSV_FILE}"
+        )
+    else:
+        print("No complete observation rows to save.")
+
+    print("-" * 100)
+
+
+# --------------------------------------------------
+# MAIN
+# --------------------------------------------------
+
+def main():
+    parser = argparse.ArgumentParser(
+        description=(
+            "Collect Prometheus metrics and predict "
+            "microservice anomalies."
+        )
+    )
+
+    parser.add_argument(
+        "--duration",
+        type=int,
+        default=0,
+        help=(
+            "Run for this many seconds. "
+            "0 means run until Ctrl+C."
+        ),
+    )
+
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="Delete the previous test_dataset.csv first.",
+    )
+
+    args = parser.parse_args()
+
+    if args.duration < 0:
+        parser.error(
+            "--duration must be zero or a positive number."
+        )
+
+    if args.reset:
+        CSV_FILE.unlink(missing_ok=True)
+
+    model, expected_features = load_model()
+
+    print("=" * 76)
+    print("LIVE METRIC COLLECTION + ANOMALY PREDICTION")
+    print("Prometheus:", PROMETHEUS_URL)
+    print("Model:", MODEL_FILE)
+    print("Output CSV:", CSV_FILE)
+    print("Collection interval:", COLLECTION_INTERVAL, "seconds")
+    print(
+        "Duration:",
+        f"{args.duration} seconds"
+        if args.duration
+        else "until Ctrl+C",
+    )
+    print("Prediction mapping: -1 = ANOMALY; +1 = NORMAL")
+    print("Actual label: fault active = ANOMALY; inactive = NORMAL")
+    print("=" * 76)
+
+    start = time.monotonic()
+
+    try:
+        while True:
+            if (
+                args.duration
+                and time.monotonic() - start >= args.duration
+            ):
+                break
+
+            cycle_start = time.monotonic()
+
+            try:
+                collect_once(model, expected_features)
+
+            except (
+                requests.RequestException,
+                RuntimeError,
+            ) as error:
+                print("Collection error:", error)
+
+            elapsed = time.monotonic() - cycle_start
+            remaining = COLLECTION_INTERVAL - elapsed
+
+            if args.duration:
+                remaining = min(
+                    remaining,
+                    max(
+                        0,
+                        args.duration
+                        - (time.monotonic() - start),
+                    ),
+                )
+
+            if remaining > 0:
+                time.sleep(remaining)
+
+            if (
+                args.duration
+                and time.monotonic() - start >= args.duration
+            ):
+                break
+
+    except KeyboardInterrupt:
+        print("\nCollection stopped by user.")
+
+    print("\nCollection finished.")
+
+    if CSV_FILE.exists():
+        try:
+            dataframe = pd.read_csv(CSV_FILE)
+            print("Dataset:", CSV_FILE)
+            print("Total rows:", len(dataframe))
+
+            if "actual_label" in dataframe.columns:
+                print(
+                    "Actual label counts:\n",
+                    dataframe["actual_label"].value_counts(
+                        dropna=False
+                    ),
+                )
+
+            if "fault_type" in dataframe.columns:
+                print(
+                    "Fault type counts:\n",
+                    dataframe["fault_type"].value_counts(
+                        dropna=False
+                    ),
+                )
+
+        except Exception as error:
+            print("Could not read output CSV:", error)
+
+
+if __name__ == "__main__":
+    main()
