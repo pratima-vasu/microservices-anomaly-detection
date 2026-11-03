@@ -12,7 +12,7 @@ RUN apt-get update \
     && cp "/tmp/prometheus-${PROMETHEUS_VERSION}.linux-amd64/prometheus" /prometheus/prometheus \
     && chmod +x /prometheus/prometheus \
     && rm -rf /tmp/prometheus* \
-    && apt-get purge -y --auto-remove curl tar
+    && apt-get purge -y --auto-remove curl
 
 WORKDIR /app
 COPY requirements.txt /app/requirements.txt
