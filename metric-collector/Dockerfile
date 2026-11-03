@@ -15,6 +15,7 @@ RUN apt-get update \
     && apt-get purge -y --auto-remove curl
 
 WORKDIR /app
+COPY storage.py /app/storage.py
 COPY requirements.txt /app/requirements.txt
 RUN pip install --upgrade pip && pip install -r requirements.txt
 
