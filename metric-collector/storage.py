@@ -11,7 +11,10 @@ def get_connection():
         user=os.environ["DB_USER"],
         password=os.environ["DB_PASSWORD"],
         database=os.getenv("DB_NAME", "anomaly_detection_db"),
-        ssl={"check_hostname": True},
+        ssl={
+            "ca": os.getenv("DB_SSL_CA", "/etc/secrets/ca.pem"),
+            "check_hostname": True
+        },
         cursorclass=DictCursor,
         autocommit=False
     )
