@@ -15,9 +15,9 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from deployment.prometheus_manager import start_prometheus, stop_prometheus
 
 SERVICES = {
-    "user-service": os.getenv("USER_SERVICE_URL", "http://localhost:8082").rstrip("/"),
-    "product-service": os.getenv("PRODUCT_SERVICE_URL", "http://localhost:8083").rstrip("/"),
-    "order-service": os.getenv("ORDER_SERVICE_URL", "http://localhost:8084").rstrip("/"),
+    "user-service": f"https://{os.getenv('USER_SERVICE_HOST', 'localhost:8082')}".rstrip("/"),
+    "product-service": f"https://{os.getenv('PRODUCT_SERVICE_HOST', 'localhost:8083')}".rstrip("/"),
+    "order-service": f"https://{os.getenv('ORDER_SERVICE_HOST', 'localhost:8084')}".rstrip("/")
 }
 
 FAULT_TYPES = ["ERROR_RATE", "CPU", "RESPONSE_TIME", "THREAD_COUNT"]
