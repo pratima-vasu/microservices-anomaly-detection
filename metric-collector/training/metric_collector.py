@@ -1,15 +1,19 @@
+
 import requests
 import pandas as pd
 import time
 import math
 import os
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 PROMETHEUS_URL = os.getenv("PROMETHEUS_URL", "http://localhost:9090").rstrip("/")
 CSV_FILE = HERE / "normal_dataset.csv"
 COLLECTION_INTERVAL = int(os.getenv("COLLECTION_INTERVAL", "5"))
+
+IST = ZoneInfo("Asia/Kolkata")
 
 
 def query_prometheus(query):
@@ -123,13 +127,14 @@ sum by (job, instance) (
 # --------------------------------------------------
 
 print("Starting metric collector...")
-print("Collecting data every 5 seconds...")
+print("Timezone: Asia/Kolkata (IST)")
+print(f"Collecting data every {COLLECTION_INTERVAL} seconds...")
 print("Press CTRL+C to stop.\n")
 
 
 while True:
 
-    timestamp = datetime.now().strftime(
+    timestamp = datetime.now(IST).strftime(
         "%Y-%m-%d %H:%M:%S.%f"
     )[:-3]
 
@@ -163,63 +168,47 @@ while True:
             "order-service"
         ]:
 
-            # Request count in last 5 seconds
             request_rate = (
                 request_rates
                 .get(service, {})
                 .get("value", 0)
             )
 
-            # Error count in last 5 seconds
             error_count = (
                 error_counts
                 .get(service, {})
                 .get("value", 0)
             )
 
-            # Live threads
             thread_count = (
                 threads
                 .get(service, {})
                 .get("value", 0)
             )
 
-            # CPU percentage
             cpu_value = (
                 cpu_usage
                 .get(service, {})
                 .get("value", 0)
             )
 
-            # Average response time in seconds
             response_time = (
                 response_times
                 .get(service, {})
                 .get("value", 0)
             )
-            # If no requests occurred, response time is not applicable.
-            # Store it as 0 for the dataset.
+
             if not math.isfinite(response_time):
                 response_time = 0
 
             row = {
                 "timestamp": timestamp,
                 "service": service,
-                "request_rate": round(
-                    request_rate, 2
-                ),
-                "error_count": round(
-                    error_count, 2
-                ),
-                "thread_count": round(
-                    thread_count, 2
-                ),
-                "cpu_usage": round(
-                    cpu_value, 2
-                ),
-                "response_time": round(
-                    response_time, 4
-                )
+                "request_rate": round(request_rate, 2),
+                "error_count": round(error_count, 2),
+                "thread_count": round(thread_count, 2),
+                "cpu_usage": round(cpu_value, 2),
+                "response_time": round(response_time, 4)
             }
 
             rows.append(row)
@@ -252,8 +241,6 @@ while True:
 
             pd.read_csv(CSV_FILE)
 
-            # Existing file -> append without header
-
             df.to_csv(
                 CSV_FILE,
                 mode="a",
@@ -262,8 +249,6 @@ while True:
             )
 
         except FileNotFoundError:
-
-            # File does not exist -> create with header
 
             df.to_csv(
                 CSV_FILE,
