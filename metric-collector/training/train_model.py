@@ -24,7 +24,7 @@ def train_model():
     if not all(pd.api.types.is_numeric_dtype(X[c]) for c in X.columns): raise ValueError("All model features must be numeric.")
     if X.columns.tolist() != EXPECTED_FEATURES:
         raise ValueError(f"Feature columns/order mismatch. Expected {EXPECTED_FEATURES}; found {X.columns.tolist()}")
-    model = IsolationForest(n_estimators=100, contamination=0.01, random_state=42)
+    model = IsolationForest(n_estimators=100, contamination=0.03, random_state=42)
     model.fit(X)
     temp_file = MODEL_FILE.with_suffix(".tmp")
     joblib.dump({"model": model, "features": X.columns.tolist()}, temp_file)
