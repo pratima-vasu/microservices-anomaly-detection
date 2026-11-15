@@ -1,3 +1,4 @@
+
 import argparse
 import math
 import os
@@ -12,14 +13,22 @@ import requests
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
-from data_preprocessing.feature_engineering import build_model_input
 
+from data_preprocessing.feature_engineering import build_model_input
+from storage import (
+    clear_test_observations,
+    insert_test_observations,
+    restore_trained_model,
+)
 
 # --------------------------------------------------
 # CONFIGURATION
 # --------------------------------------------------
 
-PROMETHEUS_URL = os.getenv("PROMETHEUS_URL", "http://localhost:9090").rstrip("/")
+PROMETHEUS_URL = os.getenv(
+    "PROMETHEUS_URL",
+    "http://localhost:9090"
+).rstrip("/")
 
 HERE = Path(__file__).resolve().parent
 MODEL_FILE = PROJECT_ROOT / "isolation_forest_model.pkl"
@@ -34,9 +43,20 @@ SERVICES = [
 ]
 
 FAULT_STATUS_URLS = {
-    "user-service": os.getenv("USER_SERVICE_URL", "http://localhost:8082").rstrip("/") + "/faults/status",
-    "product-service": os.getenv("PRODUCT_SERVICE_URL", "http://localhost:8083").rstrip("/") + "/faults/status",
-    "order-service": os.getenv("ORDER_SERVICE_URL", "http://localhost:8084").rstrip("/") + "/faults/status",
+    "user-service": os.getenv(
+        "USER_SERVICE_URL",
+        "http://localhost:8082"
+    ).rstrip("/") + "/faults/status",
+
+    "product-service": os.getenv(
+        "PRODUCT_SERVICE_URL",
+        "http://localhost:8083"
+    ).rstrip("/") + "/faults/status",
+
+    "order-service": os.getenv(
+        "ORDER_SERVICE_URL",
+        "http://localhost:8084"
+    ).rstrip("/") + "/faults/status",
 }
 
 SUPPORTED_FAULTS = {
@@ -168,16 +188,6 @@ def get_metric_values(query):
 # --------------------------------------------------
 
 def get_fault_status(service):
-    """
-    Returns:
-        ("NONE", "NORMAL")          when no fault is active
-        (fault_type, "ANOMALY")     when a known fault is active
-        ("UNKNOWN", None)           when status cannot be determined
-
-    actual_label represents fault-injection state.
-    It is independent of the Isolation Forest prediction.
-    """
-
     try:
         response = requests.get(
             FAULT_STATUS_URLS[service],
@@ -207,15 +217,10 @@ def get_fault_status(service):
 
         status = str(status_value).strip().upper()
 
-        # Handle responses such as:
-        # "Fault enabled: THREAD_COUNT"
-        # "THREAD_COUNT"
-
         for fault in SUPPORTED_FAULTS:
             if fault in status:
                 return fault, "ANOMALY"
 
-        # Handle responses indicating no active fault.
         if status in {
             "NONE",
             "NORMAL",
@@ -227,8 +232,6 @@ def get_fault_status(service):
         }:
             return "NONE", "NORMAL"
 
-        # Handle generic active status if the API
-        # does not provide a specific fault type.
         if status in {
             "ACTIVE",
             "ENABLED",
@@ -259,11 +262,13 @@ def get_fault_status(service):
 # --------------------------------------------------
 
 def load_model():
+    # Restore the latest trained model from TiDB first.
+    restore_trained_model()
+
     if not MODEL_FILE.exists():
         raise FileNotFoundError(
             f"Model not found: {MODEL_FILE}\n"
-            "Keep isolation_forest_model.pkl in the "
-            "parent metric-collector folder."
+            "Train the model before starting test collection."
         )
 
     saved = joblib.load(MODEL_FILE)
@@ -317,7 +322,6 @@ def collect_once(model, expected_features):
         error_count = metrics["error_count"].get(service)
         response_time = metrics["response_time"].get(service)
 
-        # Match the training convention for idle services.
         if request_rate == 0:
             if error_count is None:
                 error_count = 0.0
@@ -347,7 +351,6 @@ def collect_once(model, expected_features):
             )
             continue
 
-        # One complete observation for this service.
         observation = {
             "timestamp": timestamp,
             "service": service,
@@ -362,7 +365,6 @@ def collect_once(model, expected_features):
             "response_time": round(response_time, 6),
         }
 
-        # Model prediction uses the saved feature layout.
         try:
             model_input = build_model_input(
                 observation,
@@ -373,7 +375,6 @@ def collect_once(model, expected_features):
                 model.predict(model_input)[0]
             )
 
-            # Isolation Forest: -1 = anomaly, +1 = normal.
             prediction = (
                 "ANOMALY"
                 if raw_prediction == -1
@@ -391,7 +392,6 @@ def collect_once(model, expected_features):
             )
             continue
 
-        # Read actual fault state independently.
         fault_type, actual_label = get_fault_status(service)
 
         output_row = {
@@ -427,6 +427,7 @@ def collect_once(model, expected_features):
             and CSV_FILE.stat().st_size > 0
         )
 
+        # Preserve the existing CSV workflow.
         dataframe.to_csv(
             CSV_FILE,
             mode="a" if file_exists else "w",
@@ -434,10 +435,15 @@ def collect_once(model, expected_features):
             index=False,
         )
 
+        # Persist the same prediction observations in TiDB.
+        insert_test_observations(rows)
+
         print(
             f"Saved {len(rows)} prediction rows to: "
             f"{CSV_FILE}"
         )
+        print("Prediction rows also saved in TiDB.")
+
     else:
         print("No complete observation rows to save.")
 
@@ -469,7 +475,7 @@ def main():
     parser.add_argument(
         "--reset",
         action="store_true",
-        help="Delete the previous test_dataset.csv first.",
+        help="Delete previous test dataset from CSV and TiDB.",
     )
 
     args = parser.parse_args()
@@ -481,6 +487,8 @@ def main():
 
     if args.reset:
         CSV_FILE.unlink(missing_ok=True)
+        clear_test_observations()
+        print("Previous test dataset cleared from CSV and TiDB.")
 
     model, expected_features = load_model()
 

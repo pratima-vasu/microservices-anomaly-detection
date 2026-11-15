@@ -4,17 +4,37 @@ import pandas as pd
 import time
 import math
 import os
+import sys
+
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-PROMETHEUS_URL = os.getenv("PROMETHEUS_URL", "http://localhost:9090").rstrip("/")
+PROJECT_ROOT = HERE.parent
+
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from storage import insert_training_observations
+
+PROMETHEUS_URL = os.getenv(
+    "PROMETHEUS_URL",
+    "http://localhost:9090"
+).rstrip("/")
+
 CSV_FILE = HERE / "normal_dataset.csv"
-COLLECTION_INTERVAL = int(os.getenv("COLLECTION_INTERVAL", "5"))
+
+COLLECTION_INTERVAL = int(
+    os.getenv("COLLECTION_INTERVAL", "5")
+)
 
 IST = ZoneInfo("Asia/Kolkata")
 
+
+# --------------------------------------------------
+# PROMETHEUS FETCHING
+# --------------------------------------------------
 
 def query_prometheus(query):
     response = requests.get(
@@ -40,7 +60,11 @@ def get_metric_values(query):
         service = metric.get("job")
         instance = metric.get("instance")
 
-        if service in ["user-service", "product-service", "order-service"]:
+        if service in [
+            "user-service",
+            "product-service",
+            "order-service"
+        ]:
 
             values[service] = {
                 "instance": instance,
@@ -51,8 +75,7 @@ def get_metric_values(query):
 
 
 # --------------------------------------------------
-# Request Rate
-# Average requests per second over the last 1 minute
+# REQUEST RATE
 # --------------------------------------------------
 
 request_rate_query = """
@@ -65,9 +88,9 @@ sum by (job, instance) (
 )
 """
 
+
 # --------------------------------------------------
-# Error Count
-# Estimated 4xx/5xx errors over the last 1 minute
+# ERROR COUNT
 # --------------------------------------------------
 
 error_count_query = """
@@ -81,8 +104,9 @@ sum by (job, instance) (
 )
 """
 
+
 # --------------------------------------------------
-# Live Threads
+# LIVE THREADS
 # --------------------------------------------------
 
 threads_query = """
@@ -91,7 +115,7 @@ jvm_threads_live_threads
 
 
 # --------------------------------------------------
-# CPU Usage
+# CPU USAGE
 # --------------------------------------------------
 
 cpu_query = """
@@ -100,7 +124,7 @@ process_cpu_usage * 100
 
 
 # --------------------------------------------------
-# Average Response Time
+# AVERAGE RESPONSE TIME
 # --------------------------------------------------
 
 response_time_query = """
@@ -123,12 +147,36 @@ sum by (job, instance) (
 
 
 # --------------------------------------------------
-# Start Collector
+# CSV APPENDING
+# --------------------------------------------------
+
+def save_to_csv(rows):
+
+    dataframe = pd.DataFrame(rows)
+
+    file_exists = (
+        CSV_FILE.exists()
+        and CSV_FILE.stat().st_size > 0
+    )
+
+    dataframe.to_csv(
+        CSV_FILE,
+        mode="a" if file_exists else "w",
+        header=not file_exists,
+        index=False
+    )
+
+
+# --------------------------------------------------
+# START COLLECTOR
 # --------------------------------------------------
 
 print("Starting metric collector...")
 print("Timezone: Asia/Kolkata (IST)")
-print(f"Collecting data every {COLLECTION_INTERVAL} seconds...")
+print(
+    f"Collecting data every {COLLECTION_INTERVAL} seconds..."
+)
+print("Saving observations to CSV and TiDB.")
 print("Press CTRL+C to stop.\n")
 
 
@@ -231,38 +279,36 @@ while True:
                 "sec"
             )
 
-        df = pd.DataFrame(rows)
-
         # --------------------------------------------------
-        # Save data to CSV
+        # SAVE OBSERVATIONS TO TIDB
         # --------------------------------------------------
 
-        try:
+        # TiDB is the persistent source of truth.
+        # If the database write fails, do not append
+        # these rows to the local CSV.
 
-            pd.read_csv(CSV_FILE)
+        saved_count = insert_training_observations(rows)
 
-            df.to_csv(
-                CSV_FILE,
-                mode="a",
-                header=False,
-                index=False
-            )
+        print(
+            f"Saved {saved_count} observations to TiDB."
+        )
 
-        except FileNotFoundError:
+        # --------------------------------------------------
+        # SAVE DATA TO CSV
+        # --------------------------------------------------
 
-            df.to_csv(
-                CSV_FILE,
-                mode="w",
-                header=True,
-                index=False
-            )
+        save_to_csv(rows)
+
+        print(
+            f"Saved {len(rows)} observations to CSV: {CSV_FILE}"
+        )
 
         print("-" * 100)
 
     except Exception as e:
 
         print(
-            "Error while collecting metrics:",
+            "Error while collecting or saving metrics:",
             e
         )
 
