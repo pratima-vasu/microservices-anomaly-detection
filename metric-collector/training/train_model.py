@@ -63,7 +63,7 @@ def train_model():
     # Existing Isolation Forest configuration - unchanged.
     model = IsolationForest(
         n_estimators=100,
-        contamination=0.01,
+        contamination=0.001,
         random_state=42
     )
 
