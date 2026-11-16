@@ -456,7 +456,18 @@ if st.button(
 st.divider()
 
 st.subheader("Current Model")
+# TEMPORARY: Verify latest model from TiDB
+from storage import restore_trained_model
+import joblib
 
+if restore_trained_model():
+    saved = joblib.load(MODEL_FILE)
+    st.write(
+        "Latest Model Contamination:",
+        saved["model"].contamination
+    )
+else:
+    st.warning("No saved model found in TiDB.")
 if MODEL_FILE.exists():
 
     st.success(
