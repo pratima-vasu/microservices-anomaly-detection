@@ -96,8 +96,7 @@ QUERIES = {
                 uri!~"/actuator.*"
             }[1m])
         )
-        or on (job)
-        (
+        or on (job) (
             0 * max by (job) (up)
         )
     """,
@@ -109,8 +108,7 @@ QUERIES = {
                 status=~"4..|5.."
             }[1m])
         )
-        or on (job)
-        (
+        or on (job) (
             0 * max by (job) (up)
         )
     """,
@@ -122,7 +120,9 @@ QUERIES = {
     """,
 
     "cpu_usage": """
-        process_cpu_usage
+        avg by (job) (
+            process_cpu_usage
+        ) * 100
     """,
 
     "response_time": """
@@ -359,8 +359,9 @@ def collect_once(model, expected_features):
             "thread_count": round(
                 metrics["thread_count"][service], 2
             ),
+            # Prometheus query already converts CPU usage to percent.
             "cpu_usage": round(
-                metrics["cpu_usage"][service] * 100, 4
+                metrics["cpu_usage"][service], 4
             ),
             "response_time": round(response_time, 6),
         }
