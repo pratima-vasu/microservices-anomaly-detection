@@ -2,10 +2,13 @@
 """Train Isolation Forest from the prepared normal-workload dataset."""
 
 from pathlib import Path
+from datetime import datetime, timezone
+import hashlib
 import os
 import sys
 import joblib
 import pandas as pd
+import sklearn
 from sklearn.ensemble import IsolationForest
 
 HERE = Path(__file__).resolve().parent
@@ -72,10 +75,23 @@ def train_model():
     # Save the newly trained model to a temporary file first.
     temp_file = MODEL_FILE.with_suffix(".tmp")
 
+    # Keep one shared Isolation Forest; store reproducibility metadata
+    # alongside it so the exact training artifact can be audited.
+    metadata = {
+        "training_rows": int(len(X)),
+        "feature_names": X.columns.tolist(),
+        "training_timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "dataset_sha256": hashlib.sha256(DATA_FILE.read_bytes()).hexdigest(),
+        "contamination": model.contamination,
+        "offset": float(model.offset_),
+        "sklearn_version": sklearn.__version__,
+    }
+
     joblib.dump(
         {
             "model": model,
-            "features": X.columns.tolist()
+            "features": X.columns.tolist(),
+            "metadata": metadata,
         },
         temp_file
     )
