@@ -58,13 +58,16 @@ def get_metric_values(query):
         metric = result["metric"]
 
         service = metric.get("job")
+        instance = metric.get("instance")
+
         if service in [
             "user-service",
             "product-service",
             "order-service"
         ]:
-            # Queries are aggregated by job, so each service has one value.
+
             values[service] = {
+                "instance": instance,
                 "value": float(result["value"][1])
             }
 
@@ -76,13 +79,12 @@ def get_metric_values(query):
 # --------------------------------------------------
 
 request_rate_query = """
-sum by (job) (
-    rate(http_server_requests_seconds_count{
-        uri!~"/actuator.*"
-    }[1m])
-)
-or on (job) (
-    0 * max by (job) (up)
+sum by (job, instance) (
+    rate(
+        http_server_requests_seconds_count{
+            uri!~"/actuator.*"
+        }[1m]
+    )
 )
 """
 
@@ -92,14 +94,13 @@ or on (job) (
 # --------------------------------------------------
 
 error_count_query = """
-sum by (job) (
-    increase(http_server_requests_seconds_count{
-        uri!~"/actuator.*",
-        status=~"4..|5.."
-    }[1m])
-)
-or on (job) (
-    0 * max by (job) (up)
+sum by (job, instance) (
+    increase(
+        http_server_requests_seconds_count{
+            uri!~"/actuator.*",
+            status=~"4..|5.."
+        }[1m]
+    )
 )
 """
 
@@ -109,9 +110,7 @@ or on (job) (
 # --------------------------------------------------
 
 threads_query = """
-sum by (job) (
-    jvm_threads_live_threads
-)
+jvm_threads_live_threads
 """
 
 
@@ -120,9 +119,7 @@ sum by (job) (
 # --------------------------------------------------
 
 cpu_query = """
-avg by (job) (
-    process_cpu_usage
-) * 100
+process_cpu_usage * 100
 """
 
 
@@ -131,16 +128,20 @@ avg by (job) (
 # --------------------------------------------------
 
 response_time_query = """
-sum by (job) (
-    rate(http_server_requests_seconds_sum{
-        uri!~"/actuator.*"
-    }[1m])
+sum by (job, instance) (
+    rate(
+        http_server_requests_seconds_sum{
+            uri!~"/actuator.*"
+        }[1m]
+    )
 )
 /
-sum by (job) (
-    rate(http_server_requests_seconds_count{
-        uri!~"/actuator.*"
-    }[1m])
+sum by (job, instance) (
+    rate(
+        http_server_requests_seconds_count{
+            uri!~"/actuator.*"
+        }[1m]
+    )
 )
 """
 
@@ -215,47 +216,47 @@ while True:
             "order-service"
         ]:
 
-            # Do not silently replace missing JVM/CPU scrapes with zero.
-            if service not in threads or service not in cpu_usage:
-                print(
-                    f"Skipping {service}; JVM thread or CPU metric unavailable."
-                )
-                continue
+            request_rate = (
+                request_rates
+                .get(service, {})
+                .get("value", 0)
+            )
 
-            request_rate = request_rates.get(service, {}).get("value", 0.0)
-            error_count = error_counts.get(service, {}).get("value", 0.0)
-            thread_count = threads[service]["value"]
-            cpu_value = cpu_usage[service]["value"]
-            response_result = response_times.get(service)
+            error_count = (
+                error_counts
+                .get(service, {})
+                .get("value", 0)
+            )
 
-            if response_result is None:
-                if request_rate == 0:
-                    response_time = 0.0
-                else:
-                    print(
-                        f"Skipping {service}; response-time metric unavailable "
-                        "while requests are active."
-                    )
-                    continue
-            else:
-                response_time = response_result["value"]
+            thread_count = (
+                threads
+                .get(service, {})
+                .get("value", 0)
+            )
 
-            metric_values = [
-                request_rate, error_count, thread_count,
-                cpu_value, response_time
-            ]
-            if not all(math.isfinite(value) for value in metric_values):
-                print(f"Skipping {service}; one or more metrics are not finite.")
-                continue
+            cpu_value = (
+                cpu_usage
+                .get(service, {})
+                .get("value", 0)
+            )
+
+            response_time = (
+                response_times
+                .get(service, {})
+                .get("value", 0)
+            )
+
+            if not math.isfinite(response_time):
+                response_time = 0
 
             row = {
                 "timestamp": timestamp,
                 "service": service,
-                "request_rate": round(request_rate, 4),
-                "error_count": round(error_count, 4),
+                "request_rate": round(request_rate, 2),
+                "error_count": round(error_count, 2),
                 "thread_count": round(thread_count, 2),
-                "cpu_usage": round(cpu_value, 4),
-                "response_time": round(response_time, 6)
+                "cpu_usage": round(cpu_value, 2),
+                "response_time": round(response_time, 4)
             }
 
             rows.append(row)
