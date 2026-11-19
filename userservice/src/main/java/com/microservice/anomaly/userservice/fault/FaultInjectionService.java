@@ -42,9 +42,9 @@ public class FaultInjectionService {
                     "Duration must be between 1 and 300 seconds");
         }
 
-        if (requestedDelayMillis < 0 || requestedDelayMillis > 3000) {
+        if (requestedDelayMillis < 0 || requestedDelayMillis > 6000) {
             throw new IllegalArgumentException(
-                    "Delay must be between 0 and 3000 ms");
+                    "Delay must be between 0 and 6000 ms");
         }
 
         if (requestedErrorPercent < 0 || requestedErrorPercent > 50) {
@@ -57,9 +57,9 @@ public class FaultInjectionService {
                     "CPU work per request must be between 0 and 200 ms");
         }
 
-        if (requestedThreadCount < 0 || requestedThreadCount > 10) {
+        if (requestedThreadCount < 0 || requestedThreadCount > 25) {
             throw new IllegalArgumentException(
-                    "Thread count must be between 0 and 10");
+                    "Thread count must be between 0 and 25");
         }
 
         delayMillis = requestedDelayMillis;
