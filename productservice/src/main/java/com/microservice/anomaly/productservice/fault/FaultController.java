@@ -19,7 +19,8 @@ public class FaultController {
             int durationSeconds,
             long delayMillis,
             int errorPercent,
-            long cpuMillis) {}
+            long cpuMillis,
+            int threadCount) {}
 
     @PostMapping("/enable")
     public ResponseEntity<?> enable(@RequestBody FaultRequest request) {
@@ -29,7 +30,8 @@ public class FaultController {
                     request.durationSeconds(),
                     request.delayMillis(),
                     request.errorPercent(),
-                    request.cpuMillis());
+                    request.cpuMillis(),
+                    request.threadCount());
 
             return ResponseEntity.ok(
                     "Fault enabled: " + faultService.getStatus());
