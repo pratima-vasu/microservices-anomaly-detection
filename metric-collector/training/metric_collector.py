@@ -79,7 +79,7 @@ def get_metric_values(query):
 # --------------------------------------------------
 
 request_rate_query = """
-sum by (job, instance) (
+sum by (job) (
     rate(
         http_server_requests_seconds_count{
             uri!~"/actuator.*"
@@ -94,7 +94,7 @@ sum by (job, instance) (
 # --------------------------------------------------
 
 error_count_query = """
-sum by (job, instance) (
+sum by (job) (
     increase(
         http_server_requests_seconds_count{
             uri!~"/actuator.*",
@@ -110,7 +110,7 @@ sum by (job, instance) (
 # --------------------------------------------------
 
 threads_query = """
-jvm_threads_live_threads
+sum by (job) (jvm_threads_live_threads)
 """
 
 
@@ -119,7 +119,7 @@ jvm_threads_live_threads
 # --------------------------------------------------
 
 cpu_query = """
-process_cpu_usage * 100
+avg by (job) (process_cpu_usage) * 100
 """
 
 
@@ -128,7 +128,7 @@ process_cpu_usage * 100
 # --------------------------------------------------
 
 response_time_query = """
-sum by (job, instance) (
+sum by (job) (
     rate(
         http_server_requests_seconds_sum{
             uri!~"/actuator.*"
@@ -136,7 +136,7 @@ sum by (job, instance) (
     )
 )
 /
-sum by (job, instance) (
+sum by (job) (
     rate(
         http_server_requests_seconds_count{
             uri!~"/actuator.*"

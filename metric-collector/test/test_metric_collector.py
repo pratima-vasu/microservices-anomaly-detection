@@ -90,54 +90,11 @@ OUTPUT_COLUMNS = [
 # --------------------------------------------------
 
 QUERIES = {
-    "request_rate": """
-        sum by (job) (
-            rate(http_server_requests_seconds_count{
-                uri!~"/actuator.*"
-            }[1m])
-        )
-        or on (job) (
-            0 * max by (job) (up)
-        )
-    """,
-
-    "error_count": """
-        sum by (job) (
-            increase(http_server_requests_seconds_count{
-                uri!~"/actuator.*",
-                status=~"4..|5.."
-            }[1m])
-        )
-        or on (job) (
-            0 * max by (job) (up)
-        )
-    """,
-
-    "thread_count": """
-        sum by (job) (
-            jvm_threads_live_threads
-        )
-    """,
-
-    "cpu_usage": """
-        avg by (job) (
-            process_cpu_usage
-        ) * 100
-    """,
-
-    "response_time": """
-        sum by (job) (
-            rate(http_server_requests_seconds_sum{
-                uri!~"/actuator.*"
-            }[1m])
-        )
-        /
-        sum by (job) (
-            rate(http_server_requests_seconds_count{
-                uri!~"/actuator.*"
-            }[1m])
-        )
-    """,
+ "request_rate": """sum by (job) (rate(http_server_requests_seconds_count{uri!~"/actuator.*"}[1m]))""",
+ "error_count": """sum by (job) (increase(http_server_requests_seconds_count{uri!~"/actuator.*", status=~"4..|5.."}[1m]))""",
+ "thread_count": """sum by (job) (jvm_threads_live_threads)""",
+ "cpu_usage": """avg by (job) (process_cpu_usage) * 100""",
+ "response_time": """sum by (job) (rate(http_server_requests_seconds_sum{uri!~"/actuator.*"}[1m])) / sum by (job) (rate(http_server_requests_seconds_count{uri!~"/actuator.*"}[1m]))""",
 }
 
 
@@ -189,72 +146,51 @@ def get_metric_values(query):
 
 def get_fault_status(service):
     try:
-        response = requests.get(
-            FAULT_STATUS_URLS[service],
-            timeout=5,
-        )
+        response = requests.get(FAULT_STATUS_URLS[service], timeout=5)
         response.raise_for_status()
-
-        try:
-            body = response.json()
-
-            if isinstance(body, dict):
-                status_value = body.get(
-                    "status",
-                    body.get(
-                        "faultStatus",
-                        body.get(
-                            "type",
-                            body.get("active", ""),
-                        ),
-                    ),
-                )
-            else:
-                status_value = body
-
-        except ValueError:
-            status_value = response.text
-
-        status = str(status_value).strip().upper()
-
+        status = response.text.strip().upper()
         for fault in SUPPORTED_FAULTS:
-            if fault in status:
-                return fault, "ANOMALY"
-
-        if status in {
-            "NONE",
-            "NORMAL",
-            "DISABLED",
-            "FALSE",
-            "INACTIVE",
-            "0",
-            "",
-        }:
-            return "NONE", "NORMAL"
-
-        if status in {
-            "ACTIVE",
-            "ENABLED",
-            "FAULT",
-            "TRUE",
-            "1",
-        }:
-            return "ACTIVE", "ANOMALY"
-
-        print(
-            f"WARNING: Unknown fault status for "
-            f"{service}: {status!r}"
-        )
-
+            if fault in status: return fault, True
+        if status in {"NONE","NORMAL","DISABLED","FALSE","INACTIVE","0",""}: return "NONE", False
+        if status in {"ACTIVE","ENABLED","FAULT","TRUE","1"}: return "ACTIVE", True
+        print(f"WARNING: Unknown fault status for {service}: {status!r}")
+        return "UNKNOWN", None
+    except requests.RequestException as error:
+        print(f"WARNING: Cannot read fault status for {service}: {error}")
         return "UNKNOWN", None
 
-    except (requests.RequestException, ValueError) as error:
-        print(
-            f"WARNING: Cannot read fault status "
-            f"for {service}: {error}"
-        )
 
-        return "UNKNOWN", None
+TRANSITION_SECONDS = 20
+FAULT_STATES = {s: {"active": False, "fault_type": "NONE", "changed_at": None, "recovering": False} for s in SERVICES}
+
+
+def classify_actual_state(service, fault_type, active, now):
+    state = FAULT_STATES[service]
+    if active is None:
+        if state["active"]:
+            elapsed = (now - state["changed_at"]).total_seconds()
+            return state["fault_type"], "TRANSITION" if elapsed < TRANSITION_SECONDS else "ANOMALY"
+        if state["recovering"]:
+            elapsed = (now - state["changed_at"]).total_seconds()
+            if elapsed < TRANSITION_SECONDS: return state["fault_type"], "TRANSITION"
+            state.update(recovering=False, fault_type="NONE", changed_at=None)
+        return "NONE", "NORMAL"
+    if active:
+        if not state["active"]:
+            state.update(active=True, fault_type=fault_type if fault_type != "ACTIVE" else "UNKNOWN", changed_at=now, recovering=False)
+        elif fault_type not in {"ACTIVE", "UNKNOWN"}:
+            state["fault_type"] = fault_type
+        elapsed = (now - state["changed_at"]).total_seconds()
+        return state["fault_type"], "TRANSITION" if elapsed < TRANSITION_SECONDS else "ANOMALY"
+    if state["active"]:
+        state.update(active=False, changed_at=now, recovering=True)
+        return state["fault_type"], "TRANSITION"
+    if state["recovering"]:
+        elapsed = (now - state["changed_at"]).total_seconds()
+        if elapsed < TRANSITION_SECONDS: return state["fault_type"], "TRANSITION"
+        state.update(recovering=False, fault_type="NONE", changed_at=None)
+    return "NONE", "NORMAL"
+
 
 
 # --------------------------------------------------
@@ -491,7 +427,7 @@ def main():
         clear_test_observations()
         print("Previous test dataset cleared from CSV and TiDB.")
 
-    model, expected_features = load_model()
+    model, expected_features, response_time_medians = load_model()
 
     print("=" * 76)
     print("LIVE METRIC COLLECTION + ANOMALY PREDICTION")
@@ -522,7 +458,7 @@ def main():
             cycle_start = time.monotonic()
 
             try:
-                collect_once(model, expected_features)
+                collect_once(model, expected_features, response_time_medians)
 
             except (
                 requests.RequestException,

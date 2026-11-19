@@ -18,9 +18,9 @@ PROJECT_ROOT = HERE.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from storage import save_trained_model
+from storage import save_trained_model\nfrom data_preprocessing.feature_engineering import calculate_response_time_medians
 
-DATA_FILE = HERE / "normal_dataset_ml_ready.csv"
+DATA_FILE = HERE / "normal_dataset_ml_ready.csv"\nRAW_DATA_FILE = HERE / "normal_dataset.csv"
 MODEL_FILE = PROJECT_ROOT / "isolation_forest_model.pkl"
 BACKUP_FILE = PROJECT_ROOT / "isolation_forest_model.previous.pkl"
 
@@ -63,7 +63,7 @@ def train_model():
             f"found {X.columns.tolist()}"
         )
 
-    # Existing Isolation Forest configuration - unchanged.
+    if not RAW_DATA_FILE.exists():\n        raise FileNotFoundError(f"Raw training dataset not found: {RAW_DATA_FILE}")\n    response_time_medians = calculate_response_time_medians(pd.read_csv(RAW_DATA_FILE))\n\n    # Existing Isolation Forest configuration - unchanged.
     model = IsolationForest(
         n_estimators=100,
         contamination=0.03,
@@ -84,7 +84,7 @@ def train_model():
         "dataset_sha256": hashlib.sha256(DATA_FILE.read_bytes()).hexdigest(),
         "contamination": model.contamination,
         "offset": float(model.offset_),
-        "sklearn_version": sklearn.__version__,
+        "sklearn_version": sklearn.__version__,\n        "response_time_medians": response_time_medians,
     }
 
     joblib.dump(

@@ -116,7 +116,7 @@ a, b, c, d = st.columns(4)
 a.metric("Total Observations", total)
 b.metric("Labeled Observations", int(valid_actual.sum()))
 c.metric("Actual Normal", normal_count)
-d.metric("Actual Anomaly", anomaly_count)
+d.metric("Actual Anomaly", anomaly_count)\nst.metric("Transition Observations (Excluded)", transition_count)
 
 st.caption(
     "NORMAL = 0 and ANOMALY = 1 for evaluation. "
