@@ -442,7 +442,7 @@ with left:
         delay_millis = st.number_input(
             "Delay (ms)",
             min_value=1,
-            max_value=3000,
+            max_value=6000,
             value=2000
         )
 
@@ -450,7 +450,7 @@ with left:
         thread_count = st.number_input(
             "Additional threads",
             min_value=1,
-            max_value=10,
+            max_value=25,
             value=5
         )
 
