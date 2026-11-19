@@ -3,6 +3,8 @@ package com.microservice.anomaly.productservice.fault;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 
 @Service
@@ -14,21 +16,24 @@ public class FaultInjectionService {
     private volatile long delayMillis = 0;
     private volatile int errorPercent = 0;
     private volatile long cpuMillis = 0;
+    private volatile List<Thread> workerThreads = new ArrayList<>();
 
     public synchronized void enable(
             String requestedType,
             int durationSeconds,
             long requestedDelayMillis,
             int requestedErrorPercent,
-            long requestedCpuMillis) {
+            long requestedCpuMillis,
+            int requestedThreadCount) {
 
         String normalized = requestedType.toUpperCase();
 
         if (!normalized.equals("RESPONSE_TIME")
                 && !normalized.equals("ERROR_RATE")
-                && !normalized.equals("CPU")) {
+                && !normalized.equals("CPU")
+                && !normalized.equals("THREAD_COUNT")) {
             throw new IllegalArgumentException(
-                    "Supported types: RESPONSE_TIME, ERROR_RATE, CPU");
+                    "Supported types: RESPONSE_TIME, ERROR_RATE, CPU, THREAD_COUNT");
         }
 
         if (durationSeconds < 1 || durationSeconds > 300) {
@@ -46,14 +51,44 @@ public class FaultInjectionService {
                     "Error percentage must be between 0 and 50");
         }
 
-        if (requestedCpuMillis < 0 || requestedCpuMillis > 100) {
+        if (requestedCpuMillis < 0 || requestedCpuMillis > 200) {
             throw new IllegalArgumentException(
-                    "CPU work per request must be between 0 and 100 ms");
+                    "CPU work per request must be between 0 and 200 ms");
+        }
+
+        if (requestedThreadCount < 0 || requestedThreadCount > 10) {
+            throw new IllegalArgumentException(
+                    "Thread count must be between 0 and 10");
         }
 
         delayMillis = requestedDelayMillis;
         errorPercent = requestedErrorPercent;
         cpuMillis = requestedCpuMillis;
+
+        disable();
+
+        if ("THREAD_COUNT".equals(normalized)) {
+            if (requestedThreadCount < 1) {
+                throw new IllegalArgumentException(
+                        "threadCount must be at least 1 for THREAD_COUNT");
+            }
+            List<Thread> threads = new ArrayList<>();
+            for (int i = 0; i < requestedThreadCount; i++) {
+                Thread worker = new Thread(() -> {
+                    try {
+                        while (!Thread.currentThread().isInterrupted()) {
+                            Thread.sleep(1000);
+                        }
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
+                }, "fault-worker-" + i);
+                worker.setDaemon(true);
+                threads.add(worker);
+                worker.start();
+            }
+            workerThreads = threads;
+        }
 
         expiresAt = Instant.now().plusSeconds(durationSeconds);
         type = normalized;
@@ -62,6 +97,11 @@ public class FaultInjectionService {
     public synchronized void disable() {
         type = "NONE";
         expiresAt = Instant.EPOCH;
+        List<Thread> threads = workerThreads;
+        workerThreads = new ArrayList<>();
+        for (Thread worker : threads) {
+            worker.interrupt();
+        }
     }
 
     public String getStatus() {
@@ -73,7 +113,17 @@ public class FaultInjectionService {
 
     private boolean isActive() {
         if (Instant.now().isAfter(expiresAt)) {
-            type = "NONE";
+            synchronized (this) {
+                if (Instant.now().isAfter(expiresAt)) {
+                    type = "NONE";
+                    expiresAt = Instant.EPOCH;
+                    List<Thread> threads = workerThreads;
+                    workerThreads = new ArrayList<>();
+                    for (Thread worker : threads) {
+                        worker.interrupt();
+                    }
+                }
+            }
             return false;
         }
         return !"NONE".equals(type);
