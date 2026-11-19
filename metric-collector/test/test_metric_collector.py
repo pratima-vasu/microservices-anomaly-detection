@@ -161,12 +161,14 @@ def get_fault_status(service):
 
 
 TRANSITION_SECONDS = 20
-FAULT_STATES = {s: {"active": False, "fault_type": "NONE", "changed_at": None, "recovering": False} for s in SERVICES}
+FAULT_STATES = {s: {"active": False, "fault_type": "NONE", "changed_at": None, "recovering": False, "known": False} for s in SERVICES}
 
 
 def classify_actual_state(service, fault_type, active, now):
     state = FAULT_STATES[service]
     if active is None:
+        if not state["known"]:
+            return "UNKNOWN", None
         if state["active"]:
             elapsed = (now - state["changed_at"]).total_seconds()
             return state["fault_type"], "TRANSITION" if elapsed < TRANSITION_SECONDS else "ANOMALY"
@@ -176,12 +178,14 @@ def classify_actual_state(service, fault_type, active, now):
             state.update(recovering=False, fault_type="NONE", changed_at=None)
         return "NONE", "NORMAL"
     if active:
+        state["known"] = True
         if not state["active"]:
             state.update(active=True, fault_type=fault_type if fault_type != "ACTIVE" else "UNKNOWN", changed_at=now, recovering=False)
         elif fault_type not in {"ACTIVE", "UNKNOWN"}:
             state["fault_type"] = fault_type
         elapsed = (now - state["changed_at"]).total_seconds()
         return state["fault_type"], "TRANSITION" if elapsed < TRANSITION_SECONDS else "ANOMALY"
+    state["known"] = True
     if state["active"]:
         state.update(active=False, changed_at=now, recovering=True)
         return state["fault_type"], "TRANSITION"
