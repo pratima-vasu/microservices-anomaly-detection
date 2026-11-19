@@ -262,20 +262,17 @@ def collect_once(model, expected_features):
         error_count = metrics["error_count"].get(service)
         response_time = metrics["response_time"].get(service)
 
-        if request_rate == 0:
-            if error_count is None:
-                error_count = 0.0
+        if error_count is None and request_rate == 0:
+            error_count = 0.0
 
-            if response_time is None:
-                response_time = 0.0
+        # Preserve missing/zero response times for shared median imputation.
+        if response_time is None or not math.isfinite(response_time) or response_time <= 0:
+            response_time = 0.0
 
         missing = []
 
         if error_count is None:
             missing.append("error_count")
-
-        if response_time is None:
-            missing.append("response_time")
 
         for metric_name in (
             "thread_count",
