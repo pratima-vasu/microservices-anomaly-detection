@@ -100,6 +100,8 @@ df["predicted_numeric"] = normalize_label(df["prediction"])
 # --------------------------------------------------
 
 total = len(df)
+transition_mask = df["actual_label"].astype("string").str.strip().str.upper().eq("TRANSITION")
+transition_count = int(transition_mask.sum())
 
 valid_actual = df["actual_numeric"].notna()
 
@@ -137,9 +139,10 @@ if st.button(
 ):
     with st.spinner("Calculating model performance..."):
 
-        # Keep only rows with valid actual and predicted labels.
+        # Exclude TRANSITION rows from performance calculations.
         ev = df.loc[
-            df["actual_numeric"].notna()
+            ~transition_mask
+            & df["actual_numeric"].notna()
             & df["predicted_numeric"].notna()
         ].copy()
 
@@ -195,8 +198,8 @@ if st.button(
     st.dataframe(cm, use_container_width=True)
 
     st.caption(
-        f"Metrics calculated from {len(ev)} observations "
-        "with valid actual and predicted labels."
+        f"Metrics calculated from {len(ev)} observations; "
+        f"{transition_count} TRANSITION observations excluded."
     )
 
     if actual_classes != {0, 1}:

@@ -225,21 +225,23 @@ def load_model():
 
     model = saved["model"]
     expected_features = list(saved["features"])
+    response_time_medians = saved.get("metadata", {}).get("response_time_medians")
+    if not response_time_medians:
+        raise ValueError("Saved model has no response-time medians. Prepare and retrain before testing.")
 
     print("Model loaded successfully.")
     print("Expected features:", expected_features)
 
-    return model, expected_features
+    return model, expected_features, response_time_medians
 
 
 # --------------------------------------------------
 # COLLECT METRICS AND PREDICT
 # --------------------------------------------------
 
-def collect_once(model, expected_features):
-    timestamp = datetime.now().astimezone().isoformat(
-        timespec="milliseconds"
-    )
+def collect_once(model, expected_features, response_time_medians):
+    timestamp_dt = datetime.now().astimezone()
+    timestamp = timestamp_dt.isoformat(timespec="milliseconds")
 
     metrics = {
         name: get_metric_values(query)
@@ -307,6 +309,7 @@ def collect_once(model, expected_features):
             model_input = build_model_input(
                 observation,
                 expected_features,
+                response_time_medians,
             )
 
             raw_prediction = int(
@@ -330,7 +333,8 @@ def collect_once(model, expected_features):
             )
             continue
 
-        fault_type, actual_label = get_fault_status(service)
+        fault_type_now, active_now = get_fault_status(service)
+        fault_type, actual_label = classify_actual_state(service, fault_type_now, active_now, timestamp_dt)
 
         output_row = {
             **observation,
