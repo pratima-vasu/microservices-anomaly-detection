@@ -161,6 +161,7 @@ def get_fault_status(service):
 
 
 TRANSITION_SECONDS = 20
+RECOVERY_TRANSITION_SECONDS = 60
 FAULT_STATES = {s: {"active": False, "fault_type": "NONE", "changed_at": None, "recovering": False, "known": False} for s in SERVICES}
 
 
@@ -174,7 +175,7 @@ def classify_actual_state(service, fault_type, active, now):
             return state["fault_type"], "TRANSITION" if elapsed < TRANSITION_SECONDS else "ANOMALY"
         if state["recovering"]:
             elapsed = (now - state["changed_at"]).total_seconds()
-            if elapsed < TRANSITION_SECONDS: return state["fault_type"], "TRANSITION"
+            if elapsed < RECOVERY_TRANSITION_SECONDS: return state["fault_type"], "TRANSITION"
             state.update(recovering=False, fault_type="NONE", changed_at=None)
         return "NONE", "NORMAL"
     if active:
@@ -191,7 +192,7 @@ def classify_actual_state(service, fault_type, active, now):
         return state["fault_type"], "TRANSITION"
     if state["recovering"]:
         elapsed = (now - state["changed_at"]).total_seconds()
-        if elapsed < TRANSITION_SECONDS: return state["fault_type"], "TRANSITION"
+        if elapsed < RECOVERY_TRANSITION_SECONDS: return state["fault_type"], "TRANSITION"
         state.update(recovering=False, fault_type="NONE", changed_at=None)
     return "NONE", "NORMAL"
 
@@ -225,21 +226,26 @@ def load_model():
 
     model = saved["model"]
     expected_features = list(saved["features"])
-    response_time_medians = saved.get("metadata", {}).get("response_time_medians")
-    if not response_time_medians:
-        raise ValueError("Saved model has no response-time medians. Prepare and retrain before testing.")
+    metadata = saved.get("metadata", {})
+    response_time_medians = metadata.get("response_time_medians")
+    metric_thresholds = metadata.get("metric_thresholds")
+    if not response_time_medians or not metric_thresholds:
+        raise ValueError(
+            "Saved model is missing response-time medians or metric thresholds. "
+            "Open Training and retrain using the existing prepared dataset."
+        )
 
     print("Model loaded successfully.")
     print("Expected features:", expected_features)
 
-    return model, expected_features, response_time_medians
+    return model, expected_features, response_time_medians, metric_thresholds
 
 
 # --------------------------------------------------
 # COLLECT METRICS AND PREDICT
 # --------------------------------------------------
 
-def collect_once(model, expected_features, response_time_medians):
+def collect_once(model, expected_features, response_time_medians, metric_thresholds):
     timestamp_dt = datetime.now().astimezone()
     timestamp = timestamp_dt.isoformat(timespec="milliseconds")
 
@@ -316,14 +322,26 @@ def collect_once(model, expected_features, response_time_medians):
                 model.predict(model_input)[0]
             )
 
-            prediction = (
-                "ANOMALY"
-                if raw_prediction == -1
-                else "NORMAL"
-            )
-
             anomaly_score = float(
                 model.decision_function(model_input)[0]
+            )
+
+            # Keep Isolation Forest as the shared baseline and add a
+            # service-specific guard derived only from normal training data.
+            limits = metric_thresholds.get(service)
+            if not limits:
+                raise ValueError(f"No trained metric thresholds for {service}")
+
+            metric_anomaly = (
+                observation["thread_count"] > limits["thread_count_max"] * 1.05
+                or observation["cpu_usage"] > limits["cpu_usage_max"] * 1.05
+                or observation["response_time"] > limits["response_time_max"] * 1.05
+            )
+            isolation_anomaly = raw_prediction == -1
+            prediction = (
+                "ANOMALY"
+                if isolation_anomaly or metric_anomaly
+                else "NORMAL"
             )
 
         except Exception as error:
@@ -432,7 +450,7 @@ def main():
         clear_test_observations()
         print("Previous test dataset cleared from CSV and TiDB.")
 
-    model, expected_features, response_time_medians = load_model()
+    model, expected_features, response_time_medians, metric_thresholds = load_model()
 
     print("=" * 76)
     print("LIVE METRIC COLLECTION + ANOMALY PREDICTION")
@@ -447,7 +465,8 @@ def main():
         else "until Ctrl+C",
     )
     print("Prediction mapping: -1 = ANOMALY; +1 = NORMAL")
-    print("Actual label: fault active = ANOMALY; inactive = NORMAL")
+    print("Prediction: Isolation Forest OR service-specific trained metric guard")
+    print("Actual labels: 20s activation transition; 60s recovery transition for 1m rolling metrics")
     print("=" * 76)
 
     start = time.monotonic()
@@ -463,7 +482,7 @@ def main():
             cycle_start = time.monotonic()
 
             try:
-                collect_once(model, expected_features, response_time_medians)
+                collect_once(model, expected_features, response_time_medians, metric_thresholds)
 
             except (
                 requests.RequestException,
