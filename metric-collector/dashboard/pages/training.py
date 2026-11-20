@@ -19,7 +19,7 @@ MODEL_FILE = PROJECT_ROOT / "isolation_forest_model.pkl"
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from deployment.prometheus_manager import start_prometheus, stop_prometheus
-from storage import clear_training_observations
+from storage import clear_training_observations, restore_training_csv
 
 LOG_FILE = TRAIN_DIR / "training_collector.log"
 
@@ -34,6 +34,19 @@ st.title("🧠 Model Training")
 st.caption(
     "Collect confirmed normal workload → validate → preprocess → train Isolation Forest"
 )
+
+ # RESTORE THE EXISTING TRAINING DATASET FROM TIDB AFTER A FRESH DEPLOY
+if not NORMAL_CSV.exists():
+    try:
+        restored_rows = restore_training_csv()
+        if restored_rows:
+            st.info(
+                f"Restored {restored_rows:,} existing training observations from TiDB. "
+                "Prepare the training dataset before retraining."
+            )
+    except Exception as exc:
+        st.error(f"Could not restore the existing training dataset from TiDB: {exc}")
+
 
 
 # --------------------------------------------------
