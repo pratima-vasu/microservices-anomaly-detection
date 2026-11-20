@@ -38,6 +38,49 @@ EXPECTED_FEATURES = [
 ]
 
 
+def calculate_metric_thresholds(raw: pd.DataFrame) -> dict:
+    """Derive service-specific anomaly limits from the fixed normal dataset."""
+    required = [
+        "service", "request_rate", "error_count",
+        "thread_count", "cpu_usage", "response_time",
+    ]
+    missing = [column for column in required if column not in raw.columns]
+    if missing:
+        raise ValueError(f"Raw training dataset is missing columns: {missing}")
+
+    frame = raw.copy()
+    frame["service"] = frame["service"].astype(str).str.strip()
+    for column in required[1:]:
+        frame[column] = pd.to_numeric(frame[column], errors="coerce")
+
+    thresholds = {}
+    for service in ("order-service", "product-service", "user-service"):
+        service_rows = frame.loc[frame["service"] == service]
+        if service_rows.empty:
+            raise ValueError(f"No normal training observations for {service}")
+
+        active_response = service_rows.loc[
+            (service_rows["request_rate"] > 0)
+            & (service_rows["response_time"] > 0),
+            "response_time",
+        ]
+        if active_response.empty:
+            raise ValueError(
+                f"No active response-time samples available for {service}"
+            )
+
+        thresholds[service] = {
+            "thread_count_max": float(service_rows["thread_count"].max()),
+            "cpu_usage_max": float(service_rows["cpu_usage"].max()),
+            "cpu_usage_q99": float(service_rows["cpu_usage"].quantile(0.99)),
+            "error_count_max": float(service_rows["error_count"].max()),
+            "response_time_max": float(active_response.max()),
+            "response_time_median": float(active_response.median()),
+        }
+
+    return thresholds
+
+
 def train_model():
     if not DATA_FILE.exists():
         raise FileNotFoundError(
@@ -68,6 +111,7 @@ def train_model():
     if not RAW_DATA_FILE.exists():
         raise FileNotFoundError(f"Raw training dataset not found: {RAW_DATA_FILE}")
     response_time_medians = calculate_response_time_medians(pd.read_csv(RAW_DATA_FILE))
+    metric_thresholds = calculate_metric_thresholds(pd.read_csv(RAW_DATA_FILE))
 
     # Existing Isolation Forest configuration - unchanged.
     model = IsolationForest(
@@ -92,6 +136,7 @@ def train_model():
         "offset": float(model.offset_),
         "sklearn_version": sklearn.__version__,
         "response_time_medians": response_time_medians,
+        "metric_thresholds": metric_thresholds,
     }
 
     joblib.dump(
