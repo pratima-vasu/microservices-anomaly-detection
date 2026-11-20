@@ -35,7 +35,7 @@ st.caption(
     "Collect confirmed normal workload → validate → preprocess → train Isolation Forest"
 )
 
- # RESTORE THE EXISTING TRAINING DATASET FROM TIDB AFTER A FRESH DEPLOY
+# RESTORE THE EXISTING TRAINING DATASET FROM TIDB AFTER A FRESH DEPLOY
 if not NORMAL_CSV.exists():
     try:
         restored_rows = restore_training_csv()
