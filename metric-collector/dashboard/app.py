@@ -217,7 +217,7 @@ def disable_fault(service):
     return r.text
 
 
-def enable_combined_fault(combination, duration, delay_millis, cpu_millis, error_percent, thread_count):
+def enable_combined_fault(combination, duration, delay_millis, cpu_millis, error_percent, thread_count, request_rate):
     payload = {
         "combination": combination,
         "durationSeconds": int(duration),
@@ -225,6 +225,7 @@ def enable_combined_fault(combination, duration, delay_millis, cpu_millis, error
         "cpuMillis": int(cpu_millis),
         "errorPercent": int(error_percent),
         "threadCount": int(thread_count),
+        "requestRate": int(request_rate),
     }
     r = requests.post(
         f"{SERVICES['user-service']}/faults/combined/enable",
@@ -613,7 +614,7 @@ with left:
     st.subheader("⚡ Combined Faults — User Service")
     combined_type = st.selectbox(
         "Combined fault type",
-        ["CPU+RESPONSE_TIME", "THREAD_COUNT+ERROR_RATE", "ERROR_RATE+RESPONSE_TIME"],
+        ["CPU+RESPONSE_TIME", "REQUEST_RATE+ERROR_RATE", "ERROR_RATE+RESPONSE_TIME"],
         format_func=lambda x: x.replace("+", " + ")
     )
     combined_duration = st.number_input("Combined duration (seconds)", min_value=1, max_value=300, value=60, key="combined_duration")
@@ -621,19 +622,20 @@ with left:
     combined_cpu = 100
     combined_error = 50
     combined_threads = 10
+    combined_request_rate = 10
     if combined_type == "CPU+RESPONSE_TIME":
         combined_cpu = st.number_input("CPU work per request (ms)", min_value=1, max_value=200, value=100, key="combined_cpu")
         combined_delay = st.number_input("Response delay (ms)", min_value=1, max_value=6000, value=3000, key="combined_delay_cpu")
-    elif combined_type == "THREAD_COUNT+ERROR_RATE":
-        combined_threads = st.number_input("Additional threads", min_value=1, max_value=25, value=10, key="combined_threads")
-        combined_error = st.number_input("Error percentage", min_value=1, max_value=50, value=50, key="combined_error_threads")
+    elif combined_type == "REQUEST_RATE+ERROR_RATE":
+        combined_request_rate = st.select_slider("Generated request rate (requests/sec)", options=[5, 10, 15, 20], value=10, key="combined_request_rate")
+        combined_error = st.number_input("Error percentage", min_value=1, max_value=50, value=50, key="combined_error_request_rate")
     else:
         combined_error = st.number_input("Error percentage", min_value=1, max_value=50, value=50, key="combined_error_response")
         combined_delay = st.number_input("Response delay (ms)", min_value=1, max_value=6000, value=3000, key="combined_delay_error")
     if st.button("🔴 ENABLE COMBINED FAULT", type="primary", use_container_width=True):
         try:
             with st.spinner(f"Enabling {combined_type} on User Service..."):
-                result = enable_combined_fault(combined_type, combined_duration, combined_delay, combined_cpu, combined_error, combined_threads)
+                result = enable_combined_fault(combined_type, combined_duration, combined_delay, combined_cpu, combined_error, combined_threads, combined_request_rate)
             st.success(result)
         except Exception as error:
             st.error(f"Combined fault enable failed: {error}")
