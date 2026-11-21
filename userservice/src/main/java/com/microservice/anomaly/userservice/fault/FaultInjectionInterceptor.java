@@ -11,9 +11,11 @@ import org.springframework.web.servlet.HandlerInterceptor;
 public class FaultInjectionInterceptor implements HandlerInterceptor {
 
     private final FaultInjectionService faultService;
+    private final CombinedFaultInjectionService combinedFaultService;
 
-    public FaultInjectionInterceptor(FaultInjectionService faultService) {
+    public FaultInjectionInterceptor(FaultInjectionService faultService, CombinedFaultInjectionService combinedFaultService) {
         this.faultService = faultService;
+        this.combinedFaultService = combinedFaultService;
     }
 
     @Override
@@ -23,6 +25,9 @@ public class FaultInjectionInterceptor implements HandlerInterceptor {
             Object handler) throws Exception {
 
         faultService.applyFault(response);
+        if (response.getStatus() < 400 && !response.isCommitted()) {
+            combinedFaultService.applyFault(response);
+        }
 
         return response.getStatus() < 400
                 && !response.isCommitted();

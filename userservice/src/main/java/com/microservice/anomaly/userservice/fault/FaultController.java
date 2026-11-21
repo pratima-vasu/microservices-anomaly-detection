@@ -9,9 +9,11 @@ import org.springframework.web.bind.annotation.*;
 public class FaultController {
 
     private final FaultInjectionService faultService;
+    private final CombinedFaultInjectionService combinedFaultService;
 
-    public FaultController(FaultInjectionService faultService) {
+    public FaultController(FaultInjectionService faultService, CombinedFaultInjectionService combinedFaultService) {
         this.faultService = faultService;
+        this.combinedFaultService = combinedFaultService;
     }
 
     public record FaultRequest(
@@ -25,6 +27,7 @@ public class FaultController {
     @PostMapping("/enable")
     public ResponseEntity<?> enable(@RequestBody FaultRequest request) {
         try {
+            combinedFaultService.disable();
             faultService.enable(
                     request.type(),
                     request.durationSeconds(),
