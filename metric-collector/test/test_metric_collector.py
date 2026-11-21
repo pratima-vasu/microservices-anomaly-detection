@@ -1,5 +1,6 @@
 
 import argparse
+import json
 import math
 import os
 import sys
@@ -32,6 +33,7 @@ PROMETHEUS_URL = os.getenv(
 
 HERE = Path(__file__).resolve().parent
 MODEL_FILE = PROJECT_ROOT / "isolation_forest_model.pkl"
+MODEL_INFO_FILE = PROJECT_ROOT / "loaded_model_info.json"
 CSV_FILE = HERE / "test_dataset.csv"
 
 COLLECTION_INTERVAL = 5
@@ -90,8 +92,8 @@ OUTPUT_COLUMNS = [
 # --------------------------------------------------
 
 QUERIES = {
- "request_rate": """sum by (job) (rate(http_server_requests_seconds_count{uri!~"/actuator.*"}[1m])) or on (job) (0 * max by (job) (up))""",
- "error_count": """sum by (job) (increase(http_server_requests_seconds_count{uri!~"/actuator.*", status=~"4..|5.."}[1m])) or on (job) (0 * max by (job) (up))""",
+ "request_rate": """sum by (job) (rate(http_server_requests_seconds_count{uri!~"/actuator.*"}[15s])) or on (job) (0 * max by (job) (up))""",
+ "error_count": """sum by (job) (increase(http_server_requests_seconds_count{uri!~"/actuator.*", status=~"4..|5.."}[15s])) or on (job) (0 * max by (job) (up))""",
  "thread_count": """sum by (job) (jvm_threads_live_threads)""",
  "cpu_usage": """avg by (job) (process_cpu_usage) * 100""",
  "response_time": """sum by (job) (rate(http_server_requests_seconds_sum{uri!~"/actuator.*"}[15s])) / sum by (job) (rate(http_server_requests_seconds_count{uri!~"/actuator.*"}[15s]))""",
@@ -229,7 +231,23 @@ def load_model():
     if not response_time_medians:
         raise ValueError("Saved model has no response-time medians. Prepare and retrain before testing.")
 
+    metadata = saved.get("metadata", {})
+    runtime_info = {
+        "training_timestamp_utc": metadata.get("training_timestamp_utc"),
+        "dataset_sha256": metadata.get("dataset_sha256"),
+        "training_rows": metadata.get("training_rows"),
+        "contamination": float(model.contamination),
+        "features": expected_features,
+        "sklearn_version": metadata.get("sklearn_version"),
+        "loaded_at_utc": datetime.now().astimezone().isoformat(),
+    }
+    MODEL_INFO_FILE.write_text(
+        json.dumps(runtime_info, indent=2),
+        encoding="utf-8",
+    )
+
     print("Model loaded successfully.")
+    print("Loaded model metadata:", runtime_info)
     print("Expected features:", expected_features)
 
     return model, expected_features, response_time_medians
