@@ -15,14 +15,14 @@ public class CombinedFaultController {
     }
 
     public record CombinedFaultRequest(String combination, int durationSeconds, long delayMillis,
-                                       long cpuMillis, int errorPercent, int threadCount) {}
+                                       long cpuMillis, int errorPercent, int threadCount, int requestRate) {}
 
     @PostMapping("/enable")
     public ResponseEntity<?> enable(@RequestBody CombinedFaultRequest request) {
         try {
             faultService.disable();
             combinedService.enable(request.combination(), request.durationSeconds(), request.delayMillis(),
-                    request.cpuMillis(), request.errorPercent(), request.threadCount());
+                    request.cpuMillis(), request.errorPercent(), request.threadCount(), request.requestRate());
             return ResponseEntity.ok("Combined fault enabled: " + combinedService.getStatus());
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(e.getMessage());
