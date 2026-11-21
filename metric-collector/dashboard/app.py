@@ -26,7 +26,7 @@ SERVICES = {
     "order-service": f"https://{os.getenv('ORDER_SERVICE_HOST', 'localhost:8084')}".rstrip("/")
 }
 
-FAULT_TYPES = ["ERROR_RATE", "CPU", "RESPONSE_TIME", "THREAD_COUNT"]
+FAULT_TYPES = ["ERROR_RATE", "CPU", "RESPONSE_TIME", "REQUEST_RATE"]
 
 st.set_page_config(
     page_title="Microservice Anomaly Detection",
@@ -185,7 +185,7 @@ def enable_fault(
     error_percent,
     cpu_millis,
     memory_mb,
-    thread_count,
+    request_rate,
     delay_millis
 ):
     payload = {
@@ -195,7 +195,7 @@ def enable_fault(
         "errorPercent": int(error_percent),
         "cpuMillis": int(cpu_millis),
         "memoryMb": int(memory_mb),
-        "threadCount": int(thread_count),
+        "requestRate": int(request_rate),
     }
 
     r = requests.post(
@@ -217,14 +217,14 @@ def disable_fault(service):
     return r.text
 
 
-def enable_combined_fault(combination, duration, delay_millis, cpu_millis, error_percent, thread_count, request_rate):
+def enable_combined_fault(combination, duration, delay_millis, cpu_millis, error_percent, request_rate, request_rate):
     payload = {
         "combination": combination,
         "durationSeconds": int(duration),
         "delayMillis": int(delay_millis),
         "cpuMillis": int(cpu_millis),
         "errorPercent": int(error_percent),
-        "threadCount": int(thread_count),
+        "requestRate": int(request_rate),
         "requestRate": int(request_rate),
     }
     r = requests.post(
@@ -275,7 +275,7 @@ def format_live_table(df):
         "service",
         "request_rate",
         "error_count",
-        "thread_count",
+        "request_rate",
         "cpu_usage",
         "response_time",
         "actual_label",
@@ -291,7 +291,7 @@ def format_live_table(df):
         "service": "Service",
         "request_rate": "Requests/s",
         "error_count": "Errors",
-        "thread_count": "Threads",
+        "request_rate": "Threads",
         "cpu_usage": "CPU %",
         "response_time": "Response s",
         "actual_label": "Actual",
@@ -471,7 +471,7 @@ with left:
     error_percent = 50
     cpu_millis = 100
     memory_mb = 50
-    thread_count = 5
+    request_rate = 5
 
     if fault_type == "ERROR_RATE":
         error_percent = st.number_input(
@@ -497,12 +497,13 @@ with left:
             value=2000
         )
 
-    elif fault_type == "THREAD_COUNT":
-        thread_count = st.number_input(
-            "Additional threads",
+    elif fault_type == "REQUEST_RATE":
+        request_rate = st.number_input(
+            "Request rate (requests/second)",
             min_value=1,
-            max_value=25,
-            value=5
+            max_value=20,
+            value=10,
+            step=1
         )
 
     if st.button(
@@ -521,7 +522,7 @@ with left:
                     error_percent,
                     cpu_millis,
                     memory_mb,
-                    thread_count,
+                    request_rate,
                     delay_millis
                 )
 
