@@ -83,7 +83,7 @@ sum by (job) (
     rate(
         http_server_requests_seconds_count{
             uri!~"/actuator.*"
-        }[1m]
+        }[15s]
     )
 )
 """
@@ -99,7 +99,7 @@ sum by (job) (
         http_server_requests_seconds_count{
             uri!~"/actuator.*",
             status=~"4..|5.."
-        }[1m]
+        }[15s]
     )
 )
 """
