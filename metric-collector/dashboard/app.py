@@ -291,7 +291,7 @@ def format_live_table(df):
         "service": "Service",
         "thread_count": "Threads",
         "error_count": "Errors",
-        "request_rate": "Threads",
+        "request_rate": "Requests/s",
         "cpu_usage": "CPU %",
         "response_time": "Response s",
         "actual_label": "Actual",
