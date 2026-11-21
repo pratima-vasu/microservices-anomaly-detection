@@ -2,6 +2,12 @@
 package com.microservice.anomaly.userservice.fault;
 
 import org.springframework.stereotype.Service;
+import org.springframework.beans.factory.annotation.Value;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -18,6 +24,11 @@ public class FaultInjectionService {
     private volatile int errorPercent = 0;
     private volatile long cpuMillis = 0;
     private volatile List<Thread> workerThreads = new ArrayList<>();
+    private volatile Thread requestRateThread;
+    private final AtomicBoolean requestRateRunning = new AtomicBoolean(false);
+    private final HttpClient requestRateClient = HttpClient.newBuilder().connectTimeout(java.time.Duration.ofSeconds(3)).build();
+    @Value("${server.port:${PORT:8080}}")
+    private int serverPort;
 
     public synchronized void enable(
             String requestedType,
@@ -25,16 +36,16 @@ public class FaultInjectionService {
             long requestedDelayMillis,
             int requestedErrorPercent,
             long requestedCpuMillis,
-            int requestedThreadCount) {
+            int requestedRequestRate) {
 
         String normalized = requestedType.toUpperCase();
 
         if (!normalized.equals("RESPONSE_TIME")
                 && !normalized.equals("ERROR_RATE")
                 && !normalized.equals("CPU")
-                && !normalized.equals("THREAD_COUNT")) {
+                && !normalized.equals("REQUEST_RATE")) {
             throw new IllegalArgumentException(
-                    "Supported types: RESPONSE_TIME, ERROR_RATE, CPU, THREAD_COUNT");
+                    "Supported types: RESPONSE_TIME, ERROR_RATE, CPU, REQUEST_RATE");
         }
 
         if (durationSeconds < 1 || durationSeconds > 300) {
@@ -57,9 +68,8 @@ public class FaultInjectionService {
                     "CPU work per request must be between 0 and 200 ms");
         }
 
-        if (requestedThreadCount < 0 || requestedThreadCount > 25) {
-            throw new IllegalArgumentException(
-                    "Thread count must be between 0 and 25");
+        if (requestedRequestRate < 1 || requestedRequestRate > 20) {
+            throw new IllegalArgumentException("Request rate must be between 1 and 20 requests per second");
         }
 
         delayMillis = requestedDelayMillis;
@@ -68,27 +78,9 @@ public class FaultInjectionService {
 
         disable();
 
-        if ("THREAD_COUNT".equals(normalized)) {
-            if (requestedThreadCount < 1) {
-                throw new IllegalArgumentException(
-                        "threadCount must be at least 1 for THREAD_COUNT");
-            }
-            List<Thread> threads = new ArrayList<>();
-            for (int i = 0; i < requestedThreadCount; i++) {
-                Thread worker = new Thread(() -> {
-                    try {
-                        while (!Thread.currentThread().isInterrupted()) {
-                            Thread.sleep(1000);
-                        }
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                    }
-                }, "fault-worker-" + i);
-                worker.setDaemon(true);
-                threads.add(worker);
-                worker.start();
-            }
-            workerThreads = threads;
+        if ("REQUEST_RATE".equals(normalized)) {
+            if (requestedRequestRate < 1 || requestedRequestRate > 20) throw new IllegalArgumentException("requestRate must be between 1 and 20");
+            startRequestRate(requestedRequestRate, "/users");
         }
 
         expiresAt = Instant.now().plusSeconds(durationSeconds);
@@ -103,6 +95,34 @@ public class FaultInjectionService {
         for (Thread worker : threads) {
             worker.interrupt();
         }
+    }
+
+    private void startRequestRate(int requestsPerSecond, String endpoint) {
+        stopRequestRate();
+        requestRateRunning.set(true);
+        Thread generator = new Thread(() -> {
+            long intervalNanos = 1_000_000_000L / requestsPerSecond;
+            URI target = URI.create("http://127.0.0.1:" + serverPort + "/users");
+            while (requestRateRunning.get() && !Thread.currentThread().isInterrupted()) {
+                long started = System.nanoTime();
+                try {
+                    HttpRequest request = HttpRequest.newBuilder(target).timeout(java.time.Duration.ofSeconds(5)).GET().build();
+                    requestRateClient.send(request, HttpResponse.BodyHandlers.discarding());
+                } catch (Exception ignored) { }
+                long remaining = intervalNanos - (System.nanoTime() - started);
+                if (remaining > 0) {
+                    try { java.util.concurrent.TimeUnit.NANOSECONDS.sleep(remaining); }
+                    catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
+                }
+            }
+        }, "request-rate-generator");
+        generator.setDaemon(true); requestRateThread = generator; generator.start();
+    }
+
+    private void stopRequestRate() {
+        requestRateRunning.set(false);
+        Thread generator = requestRateThread; requestRateThread = null;
+        if (generator != null) generator.interrupt();
     }
 
     public String getStatus() {
