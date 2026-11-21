@@ -217,14 +217,14 @@ def disable_fault(service):
     return r.text
 
 
-def enable_combined_fault(combination, duration, delay_millis, cpu_millis, error_percent, request_rate, request_rate):
+def enable_combined_fault(combination, duration, delay_millis, cpu_millis, error_percent, thread_count, request_rate):
     payload = {
         "combination": combination,
         "durationSeconds": int(duration),
         "delayMillis": int(delay_millis),
         "cpuMillis": int(cpu_millis),
         "errorPercent": int(error_percent),
-        "requestRate": int(request_rate),
+        "threadCount": int(thread_count),
         "requestRate": int(request_rate),
     }
     r = requests.post(
@@ -275,7 +275,7 @@ def format_live_table(df):
         "service",
         "request_rate",
         "error_count",
-        "request_rate",
+        "thread_count",
         "cpu_usage",
         "response_time",
         "actual_label",
@@ -289,7 +289,7 @@ def format_live_table(df):
     labels = {
         "timestamp": "Time",
         "service": "Service",
-        "request_rate": "Requests/s",
+        "thread_count": "Threads",
         "error_count": "Errors",
         "request_rate": "Threads",
         "cpu_usage": "CPU %",
@@ -622,6 +622,7 @@ with left:
     combined_delay = 3000
     combined_cpu = 100
     combined_error = 50
+    combined_threads = 10
     combined_threads = 10
     combined_request_rate = 10
     if combined_type == "CPU+RESPONSE_TIME":
