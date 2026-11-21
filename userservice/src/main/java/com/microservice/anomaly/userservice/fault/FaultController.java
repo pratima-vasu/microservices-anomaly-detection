@@ -27,6 +27,7 @@ public class FaultController {
     @PostMapping("/enable")
     public ResponseEntity<?> enable(@RequestBody FaultRequest request) {
         try {
+            combinedFaultService.disable();
             faultService.enable(
                     request.type(),
                     request.durationSeconds(),

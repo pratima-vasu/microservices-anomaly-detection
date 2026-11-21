@@ -25,6 +25,9 @@ public class FaultInjectionInterceptor implements HandlerInterceptor {
             Object handler) throws Exception {
 
         faultService.applyFault(response);
+        if (response.getStatus() < 400 && !response.isCommitted()) {
+            combinedFaultService.applyFault(response);
+        }
 
         return response.getStatus() < 400
                 && !response.isCommitted();
