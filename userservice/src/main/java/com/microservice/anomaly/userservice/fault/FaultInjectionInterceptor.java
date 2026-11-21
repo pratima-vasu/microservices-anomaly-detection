@@ -11,6 +11,7 @@ import org.springframework.web.servlet.HandlerInterceptor;
 public class FaultInjectionInterceptor implements HandlerInterceptor {
 
     private final FaultInjectionService faultService;
+    private final CombinedFaultInjectionService combinedFaultService;
 
     public FaultInjectionInterceptor(FaultInjectionService faultService) {
         this.faultService = faultService;

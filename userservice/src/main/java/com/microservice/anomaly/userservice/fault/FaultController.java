@@ -9,6 +9,7 @@ import org.springframework.web.bind.annotation.*;
 public class FaultController {
 
     private final FaultInjectionService faultService;
+    private final CombinedFaultInjectionService combinedFaultService;
 
     public FaultController(FaultInjectionService faultService) {
         this.faultService = faultService;

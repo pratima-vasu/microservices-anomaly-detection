@@ -148,6 +148,13 @@ def get_metric_values(query):
 
 def get_fault_status(service):
     try:
+        if service == "user-service":
+            combined_url = os.getenv("USER_SERVICE_URL", "http://localhost:8082").rstrip("/") + "/faults/combined/status"
+            combined_response = requests.get(combined_url, timeout=5)
+            combined_response.raise_for_status()
+            combined_status = combined_response.text.strip().upper()
+            if combined_status not in {"", "NONE", "NORMAL", "DISABLED", "FALSE", "INACTIVE", "0"}:
+                return combined_status.replace("+", "_"), True
         response = requests.get(FAULT_STATUS_URLS[service], timeout=5)
         response.raise_for_status()
         status = response.text.strip().upper()

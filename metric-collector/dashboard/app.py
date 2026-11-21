@@ -213,7 +213,39 @@ def disable_fault(service):
         f"{SERVICES[service]}/faults/disable",
         timeout=15
     )
+    r.raise_for_status()
+    return r.text
 
+
+def enable_combined_fault(combination, duration, delay_millis, cpu_millis, error_percent, thread_count):
+    payload = {
+        "combination": combination,
+        "durationSeconds": int(duration),
+        "delayMillis": int(delay_millis),
+        "cpuMillis": int(cpu_millis),
+        "errorPercent": int(error_percent),
+        "threadCount": int(thread_count),
+    }
+    r = requests.post(
+        f"{SERVICES['user-service']}/faults/combined/enable",
+        json=payload,
+        timeout=15
+    )
+    r.raise_for_status()
+    return r.text
+
+
+def get_combined_fault_status():
+    try:
+        r = requests.get(f"{SERVICES['user-service']}/faults/combined/status", timeout=8)
+        r.raise_for_status()
+        return r.text.strip().upper()
+    except requests.RequestException:
+        return "UNAVAILABLE"
+
+
+def disable_combined_fault():
+    r = requests.post(f"{SERVICES['user-service']}/faults/combined/disable", timeout=15)
     r.raise_for_status()
     return r.text
 
@@ -574,6 +606,49 @@ with right:
         )
 
     live_prediction()
+
+
+with left:
+    st.divider()
+    st.subheader("⚡ Combined Faults — User Service")
+    combined_type = st.selectbox(
+        "Combined fault type",
+        ["CPU+RESPONSE_TIME", "THREAD_COUNT+ERROR_RATE", "ERROR_RATE+RESPONSE_TIME"],
+        format_func=lambda x: x.replace("+", " + ")
+    )
+    combined_duration = st.number_input("Combined duration (seconds)", min_value=1, max_value=300, value=60, key="combined_duration")
+    combined_delay = 3000
+    combined_cpu = 100
+    combined_error = 50
+    combined_threads = 10
+    if combined_type == "CPU+RESPONSE_TIME":
+        combined_cpu = st.number_input("CPU work per request (ms)", min_value=1, max_value=200, value=100, key="combined_cpu")
+        combined_delay = st.number_input("Response delay (ms)", min_value=1, max_value=6000, value=3000, key="combined_delay_cpu")
+    elif combined_type == "THREAD_COUNT+ERROR_RATE":
+        combined_threads = st.number_input("Additional threads", min_value=1, max_value=25, value=10, key="combined_threads")
+        combined_error = st.number_input("Error percentage", min_value=1, max_value=50, value=50, key="combined_error_threads")
+    else:
+        combined_error = st.number_input("Error percentage", min_value=1, max_value=50, value=50, key="combined_error_response")
+        combined_delay = st.number_input("Response delay (ms)", min_value=1, max_value=6000, value=3000, key="combined_delay_error")
+    if st.button("🔴 ENABLE COMBINED FAULT", type="primary", use_container_width=True):
+        try:
+            with st.spinner(f"Enabling {combined_type} on User Service..."):
+                result = enable_combined_fault(combined_type, combined_duration, combined_delay, combined_cpu, combined_error, combined_threads)
+            st.success(result)
+        except Exception as error:
+            st.error(f"Combined fault enable failed: {error}")
+    if st.button("↩ DISABLE COMBINED FAULT", use_container_width=True):
+        try:
+            st.success(disable_combined_fault())
+        except Exception as error:
+            st.error(f"Combined fault disable failed: {error}")
+    combined_status = get_combined_fault_status()
+    if combined_status not in {"NONE", "UNAVAILABLE"}:
+        st.warning(f"🔴 USER SERVICE — COMBINED FAULT ACTIVE: {combined_status}")
+    elif combined_status == "NONE":
+        st.success("🟢 USER SERVICE — NO COMBINED FAULT")
+    else:
+        st.info(f"Combined fault status: {combined_status}")
 
 
 st.divider()
