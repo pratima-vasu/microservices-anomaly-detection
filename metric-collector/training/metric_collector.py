@@ -132,7 +132,7 @@ sum by (job) (
     rate(
         http_server_requests_seconds_sum{
             uri!~"/actuator.*"
-        }[1m]
+        }[15s]
     )
 )
 /
@@ -140,7 +140,7 @@ sum by (job) (
     rate(
         http_server_requests_seconds_count{
             uri!~"/actuator.*"
-        }[1m]
+        }[15s]
     )
 )
 """
