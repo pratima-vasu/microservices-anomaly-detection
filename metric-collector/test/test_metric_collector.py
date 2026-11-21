@@ -94,7 +94,7 @@ QUERIES = {
  "error_count": """sum by (job) (increase(http_server_requests_seconds_count{uri!~"/actuator.*", status=~"4..|5.."}[1m])) or on (job) (0 * max by (job) (up))""",
  "thread_count": """sum by (job) (jvm_threads_live_threads)""",
  "cpu_usage": """avg by (job) (process_cpu_usage) * 100""",
- "response_time": """sum by (job) (rate(http_server_requests_seconds_sum{uri!~"/actuator.*"}[1m])) / sum by (job) (rate(http_server_requests_seconds_count{uri!~"/actuator.*"}[1m]))""",
+ "response_time": """sum by (job) (rate(http_server_requests_seconds_sum{uri!~"/actuator.*"}[15s])) / sum by (job) (rate(http_server_requests_seconds_count{uri!~"/actuator.*"}[15s]))""",
 }
 
 
