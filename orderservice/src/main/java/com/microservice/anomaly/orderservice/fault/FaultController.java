@@ -21,7 +21,7 @@ public class FaultController {
             int errorPercent,
             long cpuMillis,
             int memoryMb,
-            int threadCount) {
+            int requestRate) {
     }
 
     @PostMapping("/enable")
@@ -34,7 +34,7 @@ public class FaultController {
                     request.errorPercent(),
                     request.cpuMillis(),
                     request.memoryMb(),
-                    request.threadCount());
+                    request.requestRate());
 
             return ResponseEntity.ok(
                     "Fault enabled: " + faultService.getStatus());
