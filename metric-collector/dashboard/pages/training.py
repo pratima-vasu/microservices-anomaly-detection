@@ -1,6 +1,7 @@
 
 from pathlib import Path
 import subprocess
+import joblib
 import sys
 
 import pandas as pd
@@ -469,16 +470,28 @@ if st.button(
 st.divider()
 
 st.subheader("Current Model")
-# TEMPORARY: Verify latest model from TiDB
+# Restore and display the model currently saved in TiDB.
 from storage import restore_trained_model
-import joblib
 
 if restore_trained_model():
     saved = joblib.load(MODEL_FILE)
-    st.write(
-        "Latest Model Contamination:",
-        saved["model"].contamination
-    )
+    metadata = saved.get("metadata", {})
+    model = saved["model"]
+
+    st.success("Latest trained model restored from TiDB.")
+    details_left, details_right = st.columns(2)
+    with details_left:
+        st.metric("Contamination", f"{model.contamination:.4f}")
+        st.metric("Training rows", metadata.get("training_rows", "Not available"))
+        st.write("**Training timestamp (UTC)**")
+        st.code(metadata.get("training_timestamp_utc", "Not available"))
+    with details_right:
+        st.write("**Training dataset SHA-256**")
+        st.code(metadata.get("dataset_sha256", "Not available"))
+        st.write("**Features used by model**")
+        st.write(saved.get("features", []))
+        st.write("**scikit-learn version**")
+        st.write(metadata.get("sklearn_version", "Not available"))
 else:
     st.warning("No saved model found in TiDB.")
 if MODEL_FILE.exists():
