@@ -11,8 +11,9 @@ public class FaultController {
     private final FaultInjectionService faultService;
     private final CombinedFaultInjectionService combinedFaultService;
 
-    public FaultController(FaultInjectionService faultService) {
+    public FaultController(FaultInjectionService faultService, CombinedFaultInjectionService combinedFaultService) {
         this.faultService = faultService;
+        this.combinedFaultService = combinedFaultService;
     }
 
     public record FaultRequest(

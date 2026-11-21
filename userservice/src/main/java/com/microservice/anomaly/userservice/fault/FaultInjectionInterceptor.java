@@ -13,8 +13,9 @@ public class FaultInjectionInterceptor implements HandlerInterceptor {
     private final FaultInjectionService faultService;
     private final CombinedFaultInjectionService combinedFaultService;
 
-    public FaultInjectionInterceptor(FaultInjectionService faultService) {
+    public FaultInjectionInterceptor(FaultInjectionService faultService, CombinedFaultInjectionService combinedFaultService) {
         this.faultService = faultService;
+        this.combinedFaultService = combinedFaultService;
     }
 
     @Override
