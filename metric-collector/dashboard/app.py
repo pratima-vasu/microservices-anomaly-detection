@@ -1,4 +1,5 @@
 
+import json
 import os
 import subprocess
 import sys
@@ -12,6 +13,7 @@ ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = ROOT.parent
 TEST_SCRIPT = PROJECT_ROOT / "test" / "test_metric_collector.py"
 CSV_FILE = PROJECT_ROOT / "test" / "test_dataset.csv"
+MODEL_INFO_FILE = PROJECT_ROOT / "loaded_model_info.json"
 
 sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -322,6 +324,22 @@ st.caption(
     "Prometheus → Metric Collection → Feature Engineering "
     "→ Isolation Forest → Live Prediction"
 )
+
+with st.expander("Loaded model verification", expanded=True):
+    if MODEL_INFO_FILE.exists():
+        try:
+            model_info = json.loads(MODEL_INFO_FILE.read_text(encoding="utf-8"))
+            st.success("Model metadata from the model loaded by the testing collector")
+            st.write("Training timestamp (UTC):", model_info.get("training_timestamp_utc") or "Unavailable")
+            st.write("Dataset SHA-256:", model_info.get("dataset_sha256") or "Unavailable")
+            st.write("Training rows:", model_info.get("training_rows") or "Unavailable")
+            st.write("Contamination:", model_info.get("contamination", "Unavailable"))
+            st.write("Loaded at:", model_info.get("loaded_at_utc") or "Unavailable")
+            st.write("Features:", model_info.get("features", []))
+        except (OSError, json.JSONDecodeError) as error:
+            st.warning(f"Could not read loaded model metadata: {error}")
+    else:
+        st.info("Start the testing pipeline to display the exact model loaded from TiDB.")
 
 st.subheader("Microservice Status")
 
