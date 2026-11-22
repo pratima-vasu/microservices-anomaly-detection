@@ -147,21 +147,32 @@ def get_metric_values(query):
 # --------------------------------------------------
 
 def get_fault_status(service):
+    # Combined faults use a separate status endpoint for every service.
+    service_base_url = FAULT_STATUS_URLS[service].removesuffix("/faults/status")
+    combined_url = service_base_url + "/faults/combined/status"
+
     try:
-        if service == "user-service":
-            combined_url = os.getenv("USER_SERVICE_URL", "http://localhost:8082").rstrip("/") + "/faults/combined/status"
-            combined_response = requests.get(combined_url, timeout=5)
-            combined_response.raise_for_status()
-            combined_status = combined_response.text.strip().upper()
-            if combined_status not in {"", "NONE", "NORMAL", "DISABLED", "FALSE", "INACTIVE", "0"}:
-                return combined_status.replace("+", "_"), True
+        combined_response = requests.get(combined_url, timeout=5)
+        combined_response.raise_for_status()
+        combined_status = combined_response.text.strip().upper()
+        if combined_status not in {"", "NONE", "NORMAL", "DISABLED", "FALSE", "INACTIVE", "0"}:
+            return combined_status.replace("+", "_"), True
+    except requests.RequestException as error:
+        # Fall back to the single-fault status endpoint if combined status
+        # is not available on this service.
+        print(f"INFO: Combined fault status unavailable for {service}: {error}")
+
+    try:
         response = requests.get(FAULT_STATUS_URLS[service], timeout=5)
         response.raise_for_status()
         status = response.text.strip().upper()
         for fault in SUPPORTED_FAULTS:
-            if fault in status: return fault, True
-        if status in {"NONE","NORMAL","DISABLED","FALSE","INACTIVE","0",""}: return "NONE", False
-        if status in {"ACTIVE","ENABLED","FAULT","TRUE","1"}: return "ACTIVE", True
+            if fault in status:
+                return fault, True
+        if status in {"NONE", "NORMAL", "DISABLED", "FALSE", "INACTIVE", "0", ""}:
+            return "NONE", False
+        if status in {"ACTIVE", "ENABLED", "FAULT", "TRUE", "1"}:
+            return "ACTIVE", True
         print(f"WARNING: Unknown fault status for {service}: {status!r}")
         return "UNKNOWN", None
     except requests.RequestException as error:
