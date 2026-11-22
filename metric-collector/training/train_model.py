@@ -113,10 +113,10 @@ def train_model():
     response_time_medians = calculate_response_time_medians(pd.read_csv(RAW_DATA_FILE))
     metric_thresholds = calculate_metric_thresholds(pd.read_csv(RAW_DATA_FILE))
 
-    # Isolation Forest configuration for the 0.025 contamination experiment.
+    # Isolation Forest configuration selected for the current model.
     model = IsolationForest(
         n_estimators=100,
-        contamination=0.025,
+        contamination=0.03,
         random_state=42
     )
 
