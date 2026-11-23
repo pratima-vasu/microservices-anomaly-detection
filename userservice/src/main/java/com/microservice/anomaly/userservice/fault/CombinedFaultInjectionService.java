@@ -1,5 +1,6 @@
 package com.microservice.anomaly.userservice.fault;
 
+import jakarta.annotation.PreDestroy;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.stereotype.Service;
 
@@ -80,6 +81,12 @@ public class CombinedFaultInjectionService {
         for (Thread thread : old) thread.interrupt();
     }
 
+
+    @PreDestroy
+    public void shutdown() {
+        // Stops only synthetic fault traffic and worker threads, not normal incoming requests.
+        disable();
+    }
 
     private void startRequestTraffic(int requestsPerSecond) {
         trafficRunning.set(true);
