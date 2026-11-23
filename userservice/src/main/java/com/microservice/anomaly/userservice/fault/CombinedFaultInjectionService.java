@@ -13,6 +13,10 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 import org.springframework.beans.factory.annotation.Value;
 
 @Service
@@ -23,8 +27,10 @@ public class CombinedFaultInjectionService {
     private volatile long cpuMillis;
     private volatile int errorPercent;
     private volatile List<Thread> workerThreads = new ArrayList<>();
-    private volatile Thread trafficThread;
+    private volatile ScheduledExecutorService trafficScheduler;
     private final AtomicBoolean trafficRunning = new AtomicBoolean(false);
+    // Cap in-flight synthetic requests to protect the service if responses slow down.
+    private final Semaphore trafficPermits = new Semaphore(50);
     private final HttpClient httpClient = HttpClient.newBuilder().connectTimeout(java.time.Duration.ofSeconds(3)).build();
     @Value("${server.port:${PORT:8080}}")
     private int serverPort;
@@ -72,10 +78,15 @@ public class CombinedFaultInjectionService {
     public synchronized void disable() {
         combination = "NONE";
         expiresAt = Instant.EPOCH;
+
+        // Stop only scheduled synthetic fault traffic. Normal incoming API requests remain available.
         trafficRunning.set(false);
-        Thread oldTraffic = trafficThread;
-        trafficThread = null;
-        if (oldTraffic != null) oldTraffic.interrupt();
+        ScheduledExecutorService oldTraffic = trafficScheduler;
+        trafficScheduler = null;
+        if (oldTraffic != null) {
+            oldTraffic.shutdownNow();
+        }
+
         List<Thread> old = workerThreads;
         workerThreads = new ArrayList<>();
         for (Thread thread : old) thread.interrupt();
@@ -90,34 +101,33 @@ public class CombinedFaultInjectionService {
 
     private void startRequestTraffic(int requestsPerSecond) {
         trafficRunning.set(true);
-        Thread generator = new Thread(() -> {
-            long intervalNanos = 1_000_000_000L / requestsPerSecond;
-            URI target = URI.create("http://127.0.0.1:" + serverPort + "/users");
-            while (trafficRunning.get() && !Thread.currentThread().isInterrupted()) {
-                long started = System.nanoTime();
-                try {
-                    HttpRequest request = HttpRequest.newBuilder(target)
-                            .timeout(java.time.Duration.ofSeconds(5))
-                            .GET()
-                            .build();
-                    httpClient.send(request, HttpResponse.BodyHandlers.discarding());
-                } catch (Exception ignored) {
-                    // Keep the generator alive if an individual generated request fails.
-                }
-                long remaining = intervalNanos - (System.nanoTime() - started);
-                if (remaining > 0) {
-                    try {
-                        java.util.concurrent.TimeUnit.NANOSECONDS.sleep(remaining);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    }
-                }
+        URI target = URI.create("http://127.0.0.1:" + serverPort + "/users");
+
+        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(task -> {
+            Thread thread = new Thread(task, "combined-request-rate-scheduler");
+            thread.setDaemon(true);
+            return thread;
+        });
+        trafficScheduler = scheduler;
+
+        long periodNanos = Math.max(1L, TimeUnit.SECONDS.toNanos(1) / requestsPerSecond);
+        scheduler.scheduleAtFixedRate(() -> {
+            if (!trafficRunning.get() || !trafficPermits.tryAcquire()) {
+                return;
             }
-        }, "combined-request-rate-generator");
-        generator.setDaemon(true);
-        trafficThread = generator;
-        generator.start();
+
+            try {
+                HttpRequest request = HttpRequest.newBuilder(target)
+                        .timeout(java.time.Duration.ofSeconds(5))
+                        .GET()
+                        .build();
+
+                httpClient.sendAsync(request, HttpResponse.BodyHandlers.discarding())
+                        .whenComplete((response, error) -> trafficPermits.release());
+            } catch (RuntimeException error) {
+                trafficPermits.release();
+            }
+        }, 0, periodNanos, TimeUnit.NANOSECONDS);
     }
 
     private boolean isActive() {
