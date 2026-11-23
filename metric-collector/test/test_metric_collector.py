@@ -186,33 +186,53 @@ FAULT_STATES = {s: {"active": False, "fault_type": "NONE", "changed_at": None, "
 
 def classify_actual_state(service, fault_type, active, now):
     state = FAULT_STATES[service]
+
     if active is None:
+        # An unavailable status response is not proof that a fault was disabled.
+        # Preserve the last confirmed fault state until the service explicitly
+        # reports an inactive status.
         if not state["known"]:
             return "UNKNOWN", None
+
         if state["active"]:
             elapsed = (now - state["changed_at"]).total_seconds()
-            return state["fault_type"], "TRANSITION" if elapsed < TRANSITION_SECONDS else "ANOMALY"
+            label = "TRANSITION" if elapsed < TRANSITION_SECONDS else "ANOMALY"
+            return state["fault_type"], label
+
         if state["recovering"]:
-            elapsed = (now - state["changed_at"]).total_seconds()
-            if elapsed < TRANSITION_SECONDS: return state["fault_type"], "TRANSITION"
-            state.update(recovering=False, fault_type="NONE", changed_at=None)
+            return state["fault_type"], "TRANSITION"
+
         return "NONE", "NORMAL"
+
     if active:
         state["known"] = True
         if not state["active"]:
-            state.update(active=True, fault_type=fault_type if fault_type != "ACTIVE" else "UNKNOWN", changed_at=now, recovering=False)
+            state.update(
+                active=True,
+                fault_type=fault_type if fault_type != "ACTIVE" else "UNKNOWN",
+                changed_at=now,
+                recovering=False,
+            )
         elif fault_type not in {"ACTIVE", "UNKNOWN"}:
             state["fault_type"] = fault_type
+
         elapsed = (now - state["changed_at"]).total_seconds()
-        return state["fault_type"], "TRANSITION" if elapsed < TRANSITION_SECONDS else "ANOMALY"
+        label = "TRANSITION" if elapsed < TRANSITION_SECONDS else "ANOMALY"
+        return state["fault_type"], label
+
+    # A confirmed inactive response starts or completes recovery.
     state["known"] = True
     if state["active"]:
         state.update(active=False, changed_at=now, recovering=True)
         return state["fault_type"], "TRANSITION"
+
     if state["recovering"]:
         elapsed = (now - state["changed_at"]).total_seconds()
-        if elapsed < TRANSITION_SECONDS: return state["fault_type"], "TRANSITION"
+        if elapsed < TRANSITION_SECONDS:
+            return state["fault_type"], "TRANSITION"
+
         state.update(recovering=False, fault_type="NONE", changed_at=None)
+
     return "NONE", "NORMAL"
 
 
