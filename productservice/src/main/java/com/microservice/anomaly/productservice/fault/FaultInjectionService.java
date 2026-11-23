@@ -1,5 +1,6 @@
 package com.microservice.anomaly.productservice.fault;
 
+import jakarta.annotation.PreDestroy;
 import org.springframework.stereotype.Service;
 import org.springframework.beans.factory.annotation.Value;
 import java.net.URI;
@@ -89,11 +90,17 @@ public class FaultInjectionService {
     public synchronized void disable() {
         type = "NONE";
         expiresAt = Instant.EPOCH;
+        stopRequestRate(); // Stop only fault-generated traffic; normal incoming requests continue.
         List<Thread> threads = workerThreads;
         workerThreads = new ArrayList<>();
         for (Thread worker : threads) {
             worker.interrupt();
         }
+    }
+
+    @PreDestroy
+    public void shutdown() {
+        disable();
     }
 
     private void startRequestRate(int requestsPerSecond, String endpoint) {
@@ -137,6 +144,7 @@ public class FaultInjectionService {
                 if (Instant.now().isAfter(expiresAt)) {
                     type = "NONE";
                     expiresAt = Instant.EPOCH;
+                    stopRequestRate(); // Stop only fault-generated traffic when the fault expires.
                     List<Thread> threads = workerThreads;
                     workerThreads = new ArrayList<>();
                     for (Thread worker : threads) {
