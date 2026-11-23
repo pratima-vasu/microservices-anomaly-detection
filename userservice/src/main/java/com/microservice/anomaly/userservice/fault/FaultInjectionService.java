@@ -9,10 +9,6 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Semaphore;
-import java.util.concurrent.TimeUnit;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -29,10 +25,8 @@ public class FaultInjectionService {
     private volatile int errorPercent = 0;
     private volatile long cpuMillis = 0;
     private volatile List<Thread> workerThreads = new ArrayList<>();
-    private volatile ScheduledExecutorService requestRateScheduler;
+    private volatile Thread requestRateThread;
     private final AtomicBoolean requestRateRunning = new AtomicBoolean(false);
-    // Bound concurrent synthetic requests so slow responses cannot create unbounded load.
-    private final Semaphore requestRatePermits = new Semaphore(50);
     private final HttpClient requestRateClient = HttpClient.newBuilder().connectTimeout(java.time.Duration.ofSeconds(3)).build();
     @Value("${server.port:${PORT:8080}}")
     private int serverPort;
@@ -113,44 +107,29 @@ public class FaultInjectionService {
     private void startRequestRate(int requestsPerSecond, String endpoint) {
         stopRequestRate();
         requestRateRunning.set(true);
-
-        String normalizedEndpoint = endpoint.startsWith("/") ? endpoint : "/" + endpoint;
-        URI target = URI.create("http://127.0.0.1:" + serverPort + normalizedEndpoint);
-
-        ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(task -> {
-            Thread thread = new Thread(task, "request-rate-scheduler");
-            thread.setDaemon(true);
-            return thread;
-        });
-        requestRateScheduler = scheduler;
-
-        long periodNanos = Math.max(1L, TimeUnit.SECONDS.toNanos(1) / requestsPerSecond);
-        scheduler.scheduleAtFixedRate(() -> {
-            if (!requestRateRunning.get() || !requestRatePermits.tryAcquire()) {
-                return;
+        Thread generator = new Thread(() -> {
+            long intervalNanos = 1_000_000_000L / requestsPerSecond;
+            URI target = URI.create("http://127.0.0.1:" + serverPort + "/users");
+            while (requestRateRunning.get() && !Thread.currentThread().isInterrupted()) {
+                long started = System.nanoTime();
+                try {
+                    HttpRequest request = HttpRequest.newBuilder(target).timeout(java.time.Duration.ofSeconds(5)).GET().build();
+                    requestRateClient.send(request, HttpResponse.BodyHandlers.discarding());
+                } catch (Exception ignored) { }
+                long remaining = intervalNanos - (System.nanoTime() - started);
+                if (remaining > 0) {
+                    try { java.util.concurrent.TimeUnit.NANOSECONDS.sleep(remaining); }
+                    catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
+                }
             }
-
-            try {
-                HttpRequest request = HttpRequest.newBuilder(target)
-                        .timeout(java.time.Duration.ofSeconds(5))
-                        .GET()
-                        .build();
-
-                requestRateClient.sendAsync(request, HttpResponse.BodyHandlers.discarding())
-                        .whenComplete((response, error) -> requestRatePermits.release());
-            } catch (RuntimeException error) {
-                requestRatePermits.release();
-            }
-        }, 0, periodNanos, TimeUnit.NANOSECONDS);
+        }, "request-rate-generator");
+        generator.setDaemon(true); requestRateThread = generator; generator.start();
     }
 
     private void stopRequestRate() {
         requestRateRunning.set(false);
-        ScheduledExecutorService scheduler = requestRateScheduler;
-        requestRateScheduler = null;
-        if (scheduler != null) {
-            scheduler.shutdownNow();
-        }
+        Thread generator = requestRateThread; requestRateThread = null;
+        if (generator != null) generator.interrupt();
     }
 
     public String getStatus() {
