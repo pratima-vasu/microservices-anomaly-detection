@@ -1,13 +1,18 @@
-"""Live anomaly-prediction timeline for the Streamlit dashboard."""
+"""2D feature-space scatter plot for normal observations and anomalies."""
 
 import pandas as pd
 import plotly.graph_objects as go
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
 
 
-PREDICTION_COLORS = {
-    "NORMAL": "#16A34A",
-    "ANOMALY": "#DC2626",
-}
+METRIC_FEATURES = [
+    "request_rate",
+    "error_count",
+    "thread_count",
+    "cpu_usage",
+    "response_time",
+]
 
 SERVICE_SYMBOLS = {
     "user-service": "circle",
@@ -15,138 +20,216 @@ SERVICE_SYMBOLS = {
     "order-service": "diamond",
 }
 
+NORMAL_COLOR = "#16A34A"
+ANOMALY_COLOR = "#DC2626"
 
-def build_anomaly_prediction_figure(dataframe, max_points=90):
-    """Build a timeline from the latest stored predictions.
 
-    The chart reads the existing prediction field and does not modify model
-    predictions. Whatever final prediction is stored by the collector is
-    what the dashboard displays.
+def _prepare_metrics(dataframe, response_time_medians=None):
+    if dataframe is None or dataframe.empty:
+        return pd.DataFrame()
+
+    required = {"service", *METRIC_FEATURES}
+    if not required.issubset(dataframe.columns):
+        return pd.DataFrame()
+
+    frame = dataframe.copy()
+    frame["service"] = frame["service"].astype("string").str.strip()
+
+    for column in METRIC_FEATURES:
+        frame[column] = pd.to_numeric(frame[column], errors="coerce")
+
+    # Match the project's preprocessing behaviour for idle/missing response time.
+    if response_time_medians:
+        for service, median_value in response_time_medians.items():
+            mask = (
+                frame["service"].eq(service)
+                & (frame["response_time"].isna() | frame["response_time"].le(0))
+            )
+            frame.loc[mask, "response_time"] = float(median_value)
+
+    return frame.dropna(subset=METRIC_FEATURES).loc[
+        (frame[METRIC_FEATURES] >= 0).all(axis=1)
+    ].copy()
+
+
+def build_anomaly_prediction_figure(
+    training_dataframe,
+    testing_dataframe,
+    max_points=90,
+):
+    """Project five metrics into 2D PCA space.
+
+    PCA and scaling are fitted ONLY on normal training observations. Test
+    observations are projected into that fixed reference space. Training
+    normal points form the green reference cloud; test predictions are green
+    for NORMAL and red for ANOMALY.
     """
     if max_points < 1:
         raise ValueError("max_points must be at least 1")
 
-    if dataframe is None or dataframe.empty:
+    if training_dataframe is None or training_dataframe.empty:
         return None
 
-    required_columns = {"timestamp", "service", "prediction"}
-    missing_columns = required_columns.difference(dataframe.columns)
-    if missing_columns:
-        raise ValueError(
-            "Prediction graph requires columns: "
-            + ", ".join(sorted(missing_columns))
-        )
+    training = training_dataframe.copy()
+    testing = testing_dataframe.copy() if testing_dataframe is not None else pd.DataFrame()
 
-    graph_data = dataframe.copy()
-    graph_data["prediction"] = (
-        graph_data["prediction"]
-        .astype("string")
-        .str.strip()
-        .str.upper()
-    )
-    graph_data["_timestamp"] = pd.to_datetime(
-        graph_data["timestamp"],
-        errors="coerce",
-        utc=True,
+    # Derive the same per-service response-time medians used for training.
+    raw_training = training.copy()
+    for column in METRIC_FEATURES:
+        if column in raw_training.columns:
+            raw_training[column] = pd.to_numeric(raw_training[column], errors="coerce")
+
+    active = raw_training.loc[
+        raw_training.get("request_rate", pd.Series(index=raw_training.index, dtype=float)).gt(0)
+        & raw_training.get("response_time", pd.Series(index=raw_training.index, dtype=float)).gt(0)
+    ]
+    fallback = (
+        float(active["response_time"].median())
+        if not active.empty else 0.0
     )
 
-    graph_data = graph_data.loc[
-        graph_data["prediction"].isin(PREDICTION_COLORS)
-        & graph_data["_timestamp"].notna()
-    ].copy()
+    response_time_medians = {}
+    if {"service", "response_time", "request_rate"}.issubset(raw_training.columns):
+        for service in SERVICE_SYMBOLS:
+            service_active = active.loc[active["service"].astype(str).str.strip().eq(service), "response_time"]
+            response_time_medians[service] = (
+                float(service_active.median())
+                if not service_active.empty else fallback
+            )
 
-    if graph_data.empty:
+    train_clean = _prepare_metrics(training, response_time_medians)
+    test_clean = _prepare_metrics(testing, response_time_medians)
+
+    if len(train_clean) < 2:
         return None
 
-    graph_data["service"] = (
-        graph_data["service"]
-        .astype("string")
-        .fillna("unknown-service")
-    )
-    graph_data = (
-        graph_data.sort_values("_timestamp", kind="stable")
-        .tail(max_points)
-        .reset_index(drop=True)
-    )
-
-    y_values = graph_data["prediction"].map(
-        {"NORMAL": 0, "ANOMALY": 1}
-    )
-    marker_colors = graph_data["prediction"].map(
-        PREDICTION_COLORS
-    ).tolist()
-    marker_symbols = (
-        graph_data["service"]
-        .map(SERVICE_SYMBOLS)
-        .fillna("circle")
-        .tolist()
-    )
-
-    if "anomaly_score" in graph_data.columns:
-        scores = graph_data["anomaly_score"].where(
-            graph_data["anomaly_score"].notna(), ""
-        )
-    else:
-        scores = pd.Series([""] * len(graph_data), index=graph_data.index)
-
-    custom_data = list(
-        zip(
-            graph_data["service"].astype(str),
-            graph_data["prediction"].astype(str),
-            scores.astype(str),
-        )
-    )
+    scaler = StandardScaler()
+    training_scaled = scaler.fit_transform(train_clean[METRIC_FEATURES])
+    pca = PCA(n_components=2)
+    training_coordinates = pca.fit_transform(training_scaled)
 
     figure = go.Figure()
+
+    train_symbols = (
+        train_clean["service"].astype(str)
+        .map(SERVICE_SYMBOLS).fillna("circle").tolist()
+    )
+    train_custom = [
+        [str(service), "Normal training reference"]
+        for service in train_clean["service"]
+    ]
+
     figure.add_trace(
         go.Scatter(
-            x=graph_data["_timestamp"],
-            y=y_values,
+            x=training_coordinates[:, 0],
+            y=training_coordinates[:, 1],
             mode="markers",
-            name="Observations",
-            showlegend=False,
+            name="Normal training data",
             marker={
-                "size": 11,
-                "color": marker_colors,
-                "symbol": marker_symbols,
-                "line": {"width": 0.7, "color": "#FFFFFF"},
-                "opacity": 0.9,
+                "size": 6,
+                "color": NORMAL_COLOR,
+                "opacity": 0.28,
+                "symbol": train_symbols,
             },
-            customdata=custom_data,
+            customdata=train_custom,
             hovertemplate=(
-                "<b>%{customdata[1]}</b><br>"
-                "Time: %{x|%Y-%m-%d %H:%M:%S}<br>"
-                "Service: %{customdata[0]}<br>"
-                "Anomaly score: %{customdata[2]}"
-                "<extra></extra>"
+                "<b>Normal training reference</b><br>"
+                "Service: %{customdata[0]}<extra></extra>"
             ),
         )
     )
 
-    for label, color in PREDICTION_COLORS.items():
-        figure.add_trace(
-            go.Scatter(
-                x=[None],
-                y=[None],
-                mode="markers",
-                name=label,
-                marker={"size": 10, "color": color, "symbol": "circle"},
-                hoverinfo="skip",
-            )
+    if not test_clean.empty and "prediction" in test_clean.columns:
+        test_clean["prediction"] = (
+            test_clean["prediction"].astype("string").str.strip().str.upper()
         )
+        test_clean["_timestamp"] = pd.to_datetime(
+            test_clean.get("timestamp"),
+            errors="coerce",
+            utc=True,
+        )
+        test_clean = test_clean.loc[
+            test_clean["prediction"].isin(["NORMAL", "ANOMALY"])
+        ].copy()
 
+        if "timestamp" in test_clean.columns:
+            test_clean = test_clean.sort_values(
+                "_timestamp", kind="stable", na_position="last"
+            )
+        test_clean = test_clean.tail(max_points).reset_index(drop=True)
+
+        if not test_clean.empty:
+            test_coordinates = pca.transform(
+                scaler.transform(test_clean[METRIC_FEATURES])
+            )
+
+            for label, color in (
+                ("NORMAL", NORMAL_COLOR),
+                ("ANOMALY", ANOMALY_COLOR),
+            ):
+                mask = test_clean["prediction"].eq(label)
+                if not mask.any():
+                    continue
+
+                selected = test_clean.loc[mask].copy()
+                selected_coordinates = test_coordinates[mask.to_numpy()]
+                selected_symbols = (
+                    selected["service"].astype(str)
+                    .map(SERVICE_SYMBOLS).fillna("circle").tolist()
+                )
+                selected_times = (
+                    selected["_timestamp"].astype("string").fillna("Unknown")
+                    if "_timestamp" in selected.columns
+                    else pd.Series(["Unknown"] * len(selected), index=selected.index)
+                )
+                selected_scores = (
+                    selected["anomaly_score"].astype("string").fillna("Unavailable")
+                    if "anomaly_score" in selected.columns
+                    else pd.Series(["Unavailable"] * len(selected), index=selected.index)
+                )
+                custom = list(zip(
+                    selected["service"].astype(str),
+                    selected_times.astype(str),
+                    selected_scores.astype(str),
+                ))
+
+                figure.add_trace(
+                    go.Scatter(
+                        x=selected_coordinates[:, 0],
+                        y=selected_coordinates[:, 1],
+                        mode="markers",
+                        name=f"Test {label}",
+                        marker={
+                            "size": 11,
+                            "color": color,
+                            "opacity": 0.95,
+                            "symbol": selected_symbols,
+                            "line": {"width": 0.8, "color": "#FFFFFF"},
+                        },
+                        customdata=custom,
+                        hovertemplate=(
+                            f"<b>{label}</b><br>"
+                            "Service: %{customdata[0]}<br>"
+                            "Time: %{customdata[1]}<br>"
+                            "Anomaly score: %{customdata[2]}"
+                            "<extra></extra>"
+                        ),
+                    )
+                )
+
+    explained = float(pca.explained_variance_ratio_.sum() * 100)
     figure.update_layout(
         title={
-            "text": "Anomaly Prediction Graph",
+            "text": "Normal Cluster vs Anomaly Outliers",
             "x": 0,
             "xanchor": "left",
         },
-        height=320,
+        height=430,
         margin={"l": 12, "r": 12, "t": 52, "b": 12},
         template="plotly_white",
         hovermode="closest",
         legend={
-            "title": {"text": "Prediction"},
+            "title": {"text": "Observations"},
             "orientation": "h",
             "yanchor": "bottom",
             "y": 1.02,
@@ -154,20 +237,26 @@ def build_anomaly_prediction_figure(dataframe, max_points=90):
             "x": 1,
         },
         xaxis={
-            "title": "Time",
-            "showgrid": True,
-            "gridcolor": "rgba(120, 120, 120, 0.16)",
-        },
-        yaxis={
-            "title": "Prediction",
-            "tickmode": "array",
-            "tickvals": [0, 1],
-            "ticktext": ["NORMAL", "ANOMALY"],
-            "range": [-0.28, 1.28],
+            "title": "Principal Component 1",
             "showgrid": True,
             "gridcolor": "rgba(120, 120, 120, 0.16)",
             "zeroline": False,
         },
+        yaxis={
+            "title": "Principal Component 2",
+            "showgrid": True,
+            "gridcolor": "rgba(120, 120, 120, 0.16)",
+            "zeroline": False,
+        },
+    )
+    figure.add_annotation(
+        text=f"2D PCA projection of 5 metrics · {explained:.1f}% variance shown",
+        xref="paper",
+        yref="paper",
+        x=0,
+        y=-0.18,
+        showarrow=False,
+        font={"size": 10, "color": "#777777"},
     )
 
     return figure
