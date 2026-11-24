@@ -17,7 +17,7 @@ class AnomalyPredictionGraphTests(unittest.TestCase):
     def test_requires_prediction_columns(self):
         with self.assertRaises(ValueError):
             build_anomaly_prediction_figure(
-                pd.DataFrame({"timestamp": [], "prediction": []})
+                pd.DataFrame({"timestamp": ["2026-11-24T10:00:05+00:00"], "prediction": ["NORMAL"]})
             )
 
     def test_uses_normal_and_anomaly_values_from_prediction_column(self):
