@@ -16,7 +16,9 @@ CSV_FILE = PROJECT_ROOT / "test" / "test_dataset.csv"
 MODEL_INFO_FILE = PROJECT_ROOT / "loaded_model_info.json"
 
 sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(ROOT))
 
+from anomaly_prediction_graph import build_anomaly_prediction_figure
 from deployment.prometheus_manager import start_prometheus, stop_prometheus
 from storage import restore_test_csv, clear_test_observations
 
@@ -585,6 +587,25 @@ with right:
             f"Showing latest {len(display_df)} collected "
             f"observations | Total stored in CSV: {len(df)}"
         )
+
+        prediction_figure = build_anomaly_prediction_figure(
+            df,
+            max_points=90,
+        )
+        if prediction_figure is not None:
+            st.plotly_chart(
+                prediction_figure,
+                use_container_width=True,
+                config={"displayModeBar": False},
+                key="live-anomaly-prediction-graph",
+            )
+            st.caption(
+                "Showing the latest 90 valid predictions. "
+                "Green = NORMAL; red = ANOMALY. Hover over a point "
+                "to see its service, timestamp and anomaly score."
+            )
+        else:
+            st.info("No valid NORMAL/ANOMALY predictions available for the graph yet.")
 
         if (
             "Prediction" in display_df.columns
