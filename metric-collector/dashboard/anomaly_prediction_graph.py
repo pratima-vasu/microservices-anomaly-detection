@@ -20,6 +20,12 @@ SERVICE_SYMBOLS = {
     "order-service": "diamond",
 }
 
+MODEL_FEATURES = METRIC_FEATURES + [
+    "service_order-service",
+    "service_product-service",
+    "service_user-service",
+]
+
 NORMAL_COLOR = "#16A34A"
 ANOMALY_COLOR = "#DC2626"
 
@@ -50,6 +56,15 @@ def _prepare_metrics(dataframe, response_time_medians=None):
     return frame.dropna(subset=METRIC_FEATURES).loc[
         (frame[METRIC_FEATURES] >= 0).all(axis=1)
     ].copy()
+
+
+def _model_feature_matrix(frame):
+    """Create the same five numeric and three service one-hot features."""
+    encoded = frame[METRIC_FEATURES].copy()
+    encoded["service_order-service"] = frame["service"].eq("order-service").astype(int)
+    encoded["service_product-service"] = frame["service"].eq("product-service").astype(int)
+    encoded["service_user-service"] = frame["service"].eq("user-service").astype(int)
+    return encoded[MODEL_FEATURES]
 
 
 def build_anomaly_prediction_figure(
@@ -104,7 +119,8 @@ def build_anomaly_prediction_figure(
         return None
 
     scaler = StandardScaler()
-    training_scaled = scaler.fit_transform(train_clean[METRIC_FEATURES])
+    training_features = _model_feature_matrix(train_clean)
+    training_scaled = scaler.fit_transform(training_features)
     pca = PCA(n_components=2)
     training_coordinates = pca.fit_transform(training_scaled)
 
@@ -159,8 +175,9 @@ def build_anomaly_prediction_figure(
         test_clean = test_clean.tail(max_points).reset_index(drop=True)
 
         if not test_clean.empty:
+            test_features = _model_feature_matrix(test_clean)
             test_coordinates = pca.transform(
-                scaler.transform(test_clean[METRIC_FEATURES])
+                scaler.transform(test_features)
             )
 
             for label, color in (
@@ -217,7 +234,12 @@ def build_anomaly_prediction_figure(
                     )
                 )
 
-    explained = float(pca.explained_variance_ratio_.sum() * 100)
+    explained = float(
+        sum(
+            value for value in pca.explained_variance_ratio_
+            if pd.notna(value)
+        ) * 100
+    )
     figure.update_layout(
         title={
             "text": "Normal Cluster vs Anomaly Outliers",
