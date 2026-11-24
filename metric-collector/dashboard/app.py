@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = ROOT.parent
 TEST_SCRIPT = PROJECT_ROOT / "test" / "test_metric_collector.py"
 CSV_FILE = PROJECT_ROOT / "test" / "test_dataset.csv"
+TRAINING_CSV_FILE = PROJECT_ROOT / "training" / "normal_dataset.csv"
 MODEL_INFO_FILE = PROJECT_ROOT / "loaded_model_info.json"
 
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -20,7 +21,7 @@ sys.path.insert(0, str(ROOT))
 
 from anomaly_prediction_graph import build_anomaly_prediction_figure
 from deployment.prometheus_manager import start_prometheus, stop_prometheus
-from storage import restore_test_csv, clear_test_observations
+from storage import restore_test_csv, restore_training_csv, clear_test_observations
 
 SERVICES = {
     "user-service": f"https://{os.getenv('USER_SERVICE_HOST', 'localhost:8082')}".rstrip("/"),
@@ -60,6 +61,19 @@ if "test_csv_restored" not in st.session_state:
         st.session_state.test_csv_restored = True
     except Exception as error:
         st.error(f"Could not restore test dataset from TiDB: {error}")
+
+
+if "training_csv_restored" not in st.session_state:
+    try:
+        if (
+            not TRAINING_CSV_FILE.exists()
+            or TRAINING_CSV_FILE.stat().st_size == 0
+        ):
+            restore_training_csv()
+        st.session_state.training_csv_restored = True
+    except Exception as error:
+        st.session_state.training_csv_restored = False
+        st.warning(f"Normal training reference could not be restored: {error}")
 
 
 if "collector" not in st.session_state:
@@ -265,6 +279,19 @@ def read_dataset():
         return pd.read_csv(CSV_FILE)
 
     except (pd.errors.EmptyDataError, PermissionError):
+        return pd.DataFrame()
+
+
+def read_training_reference():
+    if (
+        not TRAINING_CSV_FILE.exists()
+        or TRAINING_CSV_FILE.stat().st_size == 0
+    ):
+        return pd.DataFrame()
+
+    try:
+        return pd.read_csv(TRAINING_CSV_FILE)
+    except (pd.errors.EmptyDataError, PermissionError, OSError):
         return pd.DataFrame()
 
 
@@ -588,7 +615,9 @@ with right:
             f"observations | Total stored in CSV: {len(df)}"
         )
 
+        training_reference = read_training_reference()
         prediction_figure = build_anomaly_prediction_figure(
+            training_reference,
             df,
             max_points=90,
         )
@@ -600,12 +629,15 @@ with right:
                 key="live-anomaly-prediction-graph",
             )
             st.caption(
-                "Showing the latest 90 valid predictions. "
-                "Green = NORMAL; red = ANOMALY. Hover over a point "
-                "to see its service, timestamp and anomaly score."
+                "Green = normal training/reference observations and NORMAL test predictions; "
+                "red = ANOMALY test predictions. The five numeric metrics are projected "
+                "into two PCA dimensions. Hover over a point for service, time and score."
             )
         else:
-            st.info("No valid NORMAL/ANOMALY predictions available for the graph yet.")
+            st.info(
+                "The anomaly scatter plot needs normal training observations. "
+                "Open Model Training and make sure the normal_dataset.csv is available."
+            )
 
         if (
             "Prediction" in display_df.columns
