@@ -272,7 +272,7 @@ def build_anomaly_prediction_figure(
         },
     )
     figure.add_annotation(
-        text=f"2D PCA projection of 5 metrics · {explained:.1f}% variance shown",
+        text=f"2D PCA projection of 5 metrics + service identity · {explained:.1f}% variance shown",
         xref="paper",
         yref="paper",
         x=0,
