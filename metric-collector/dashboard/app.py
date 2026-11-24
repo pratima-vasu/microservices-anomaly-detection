@@ -630,8 +630,9 @@ with right:
             )
             st.caption(
                 "Green = normal training/reference observations and NORMAL test predictions; "
-                "red = ANOMALY test predictions. The five numeric metrics are projected "
-                "into two PCA dimensions. Hover over a point for service, time and score."
+                "red = ANOMALY test predictions. The same five numeric and three service "
+                "features used by Isolation Forest are projected into two PCA dimensions. "
+                "Hover over a point for service, time and score."
             )
         else:
             st.info(
