@@ -80,7 +80,7 @@ echo "======================================"
 echo "Starting Streamlit dashboard..."
 echo "======================================"
 
-exec streamlit run /app/dashboard/app.py \
+exec streamlit run /app/dashboard/Prediction.py \
   --server.address=0.0.0.0 \
   --server.port="${PORT:-10000}" \
   --server.headless=true \

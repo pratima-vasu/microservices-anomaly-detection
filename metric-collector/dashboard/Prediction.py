@@ -186,59 +186,60 @@ def service_health(base_url):
         return False
 
 
-def get_fault_status(service):
-    try:
-        r = requests.get(
-            f"{SERVICES[service]}/faults/status",
-            timeout=8
-        )
-        r.raise_for_status()
-        return r.text.strip().upper()
-
-    except requests.RequestException:
-        return "UNAVAILABLE"
-
-
-def enable_fault(
-    service,
-    fault_type,
-    duration,
-    error_percent,
-    cpu_millis,
-    memory_mb,
-    request_rate,
-    delay_millis
-):
-    payload = {
-        "type": fault_type,
-        "durationSeconds": int(duration),
-        "delayMillis": int(delay_millis),
-        "errorPercent": int(error_percent),
-        "cpuMillis": int(cpu_millis),
-        "memoryMb": int(memory_mb),
-        "requestRate": int(request_rate),
-    }
-
-    r = requests.post(
-        f"{SERVICES[service]}/faults/enable",
-        json=payload,
-        timeout=15
-    )
-
-    r.raise_for_status()
-    return r.text
-
-
-def disable_fault(service):
-    r = requests.post(
-        f"{SERVICES[service]}/faults/disable",
-        timeout=15
-    )
-    r.raise_for_status()
-    return r.text
-
-
-def enable_combined_fault(service, combination, duration, delay_millis, cpu_millis, error_percent, thread_count, request_rate):
+# SINGLE-FAULT API HELPERS DISABLED — original code retained as comments.
+# def get_fault_status(service):
+#     try:
+#         r = requests.get(
+#             f"{SERVICES[service]}/faults/status",
+#             timeout=8
+#         )
+#         r.raise_for_status()
+#         return r.text.strip().upper()
+#
+#     except requests.RequestException:
+#         return "UNAVAILABLE"
+#
+#
+# def enable_fault(
+#     service,
+#     fault_type,
+#     duration,
+#     error_percent,
+#     cpu_millis,
+#     memory_mb,
+#     request_rate,
+#     delay_millis
+# ):
+#     payload = {
+#         "type": fault_type,
+#         "durationSeconds": int(duration),
+#         "delayMillis": int(delay_millis),
+#         "errorPercent": int(error_percent),
+#         "cpuMillis": int(cpu_millis),
+#         "memoryMb": int(memory_mb),
+#         "requestRate": int(request_rate),
+#     }
+#
+#     r = requests.post(
+#         f"{SERVICES[service]}/faults/enable",
+#         json=payload,
+#         timeout=15
+#     )
+#
+#     r.raise_for_status()
+#     return r.text
+#
+#
+# def disable_fault(service):
+#     r = requests.post(
+#         f"{SERVICES[service]}/faults/disable",
+#         timeout=15
+#     )
+#     r.raise_for_status()
+#     return r.text
+#
+#
+#def enable_combined_fault(service, combination, duration, delay_millis, cpu_millis, error_percent, thread_count, request_rate):
     payload = {
         "combination": combination,
         "durationSeconds": int(duration),
@@ -408,22 +409,23 @@ st.caption(
     "→ Isolation Forest → Live Prediction"
 )
 
-with st.expander("Loaded model verification", expanded=True):
-    if MODEL_INFO_FILE.exists():
-        try:
-            model_info = json.loads(MODEL_INFO_FILE.read_text(encoding="utf-8"))
-            st.success("Model metadata from the model loaded by the testing collector")
-            st.write("Training timestamp (UTC):", model_info.get("training_timestamp_utc") or "Unavailable")
-            st.write("Dataset SHA-256:", model_info.get("dataset_sha256") or "Unavailable")
-            st.write("Training rows:", model_info.get("training_rows") or "Unavailable")
-            st.write("Contamination:", model_info.get("contamination", "Unavailable"))
-            st.write("Loaded at:", model_info.get("loaded_at_utc") or "Unavailable")
-            st.write("Features:", model_info.get("features", []))
-        except (OSError, json.JSONDecodeError) as error:
-            st.warning(f"Could not read loaded model metadata: {error}")
-    else:
-        st.info("Start the testing pipeline to display the exact model loaded from TiDB.")
-
+# LOADED MODEL VERIFICATION UI DISABLED — original code retained as comments.
+# with st.expander("Loaded model verification", expanded=True):
+#     if MODEL_INFO_FILE.exists():
+#         try:
+#             model_info = json.loads(MODEL_INFO_FILE.read_text(encoding="utf-8"))
+#             st.success("Model metadata from the model loaded by the testing collector")
+#             st.write("Training timestamp (UTC):", model_info.get("training_timestamp_utc") or "Unavailable")
+#             st.write("Dataset SHA-256:", model_info.get("dataset_sha256") or "Unavailable")
+#             st.write("Training rows:", model_info.get("training_rows") or "Unavailable")
+#             st.write("Contamination:", model_info.get("contamination", "Unavailable"))
+#             st.write("Loaded at:", model_info.get("loaded_at_utc") or "Unavailable")
+#             st.write("Features:", model_info.get("features", []))
+#         except (OSError, json.JSONDecodeError) as error:
+#             st.warning(f"Could not read loaded model metadata: {error}")
+#     else:
+#         st.info("Start the testing pipeline to display the exact model loaded from TiDB.")
+#
 st.subheader("Microservice Status")
 
 cols = st.columns(3)
@@ -492,198 +494,126 @@ with c4:
 left, right = st.columns([0.85, 2.15], gap="large")
 
 
-# --------------------------------------------------
-# FAULT INJECTION
-# --------------------------------------------------
-
-with left:
-    st.subheader("⚡ Fault Injection")
-
-    service = st.selectbox(
-        "Service",
-        list(SERVICES.keys())
-    )
-
-    fault_type = st.selectbox(
-        "Fault Type",
-        FAULT_TYPES
-    )
-
-    duration = st.number_input(
-        "Duration (seconds)",
-        min_value=1,
-        max_value=300,
-        value=60,
-        step=1
-    )
-
-    delay_millis = 2000
-    error_percent = 50
-    cpu_millis = 100
-    memory_mb = 50
-    request_rate = 5
-
-    if fault_type == "ERROR_RATE":
-        error_percent = st.number_input(
-            "Error percentage",
-            min_value=1,
-            max_value=50,
-            value=50
-        )
-
-    elif fault_type == "CPU":
-        cpu_millis = st.number_input(
-            "CPU work per request (ms)",
-            min_value=1,
-            max_value=200,
-            value=200
-        )
-
-    elif fault_type == "RESPONSE_TIME":
-        delay_millis = st.number_input(
-            "Delay (ms)",
-            min_value=1,
-            max_value=6000,
-            value=2000
-        )
-
-    elif fault_type == "REQUEST_RATE":
-        request_rate = st.number_input(
-            "Request rate (requests/second)",
-            min_value=1,
-            max_value=20,
-            value=10,
-            step=1
-        )
-
-    if st.button(
-        "🔴 ENABLE FAULT",
-        type="primary",
-        use_container_width=True
-    ):
-        try:
-            with st.spinner(
-                f"Enabling {fault_type} on {service}..."
-            ):
-                result = enable_fault(
-                    service,
-                    fault_type,
-                    duration,
-                    error_percent,
-                    cpu_millis,
-                    memory_mb,
-                    request_rate,
-                    delay_millis
-                )
-
-            st.success(result)
-
-        except Exception as error:
-            st.error(f"Fault enable failed: {error}")
-
-    if st.button(
-        "↩ DISABLE FAULT",
-        use_container_width=True
-    ):
-        try:
-            with st.spinner(
-                f"Disabling fault on {service}..."
-            ):
-                result = disable_fault(service)
-
-            st.success(result)
-
-        except Exception as error:
-            st.error(f"Fault disable failed: {error}")
-
-    status = get_fault_status(service)
-
-    if status != "NONE" and status != "UNAVAILABLE":
-        st.warning(
-            f"🔴 ACTIVE FAULT — {service} — {status}"
-        )
-
-    elif status == "NONE":
-        st.success(f"🟢 {service} — NORMAL")
-
-    else:
-        st.info(f"Status: {status}")
-
-
-# --------------------------------------------------
-# LIVE PREDICTIONS
-# --------------------------------------------------
-
-with right:
-    st.subheader("📡 Live Predictions")
-
-    @st.fragment(run_every=5)
-    def live_prediction():
-        df = read_dataset()
-
-        if df.empty:
-            st.info(
-                "No observations yet. Press START to begin "
-                "the testing pipeline."
-            )
-            return
-
-        live_df = df.tail(30).copy()
-        display_df = format_live_table(live_df)
-
-        st.caption(
-            f"Showing latest {len(display_df)} collected "
-            f"observations | Total stored in CSV: {len(df)}"
-        )
-
-        training_reference = read_training_reference()
-        prediction_figure = build_anomaly_prediction_figure(
-            training_reference,
-            df,
-            max_points=90,
-        )
-        if prediction_figure is not None:
-            st.plotly_chart(
-                prediction_figure,
-                use_container_width=True,
-                config={"displayModeBar": False},
-                key="live-anomaly-prediction-graph",
-            )
-            st.caption(
-                "Green = normal training/reference observations and NORMAL test predictions; "
-                "red = ANOMALY test predictions. The same five numeric and three service "
-                "features used by Isolation Forest are projected into two PCA dimensions. "
-                "Hover over a point for service, time and score."
-            )
-        else:
-            st.info(
-                "The anomaly scatter plot needs normal training observations. "
-                "Open Model Training and make sure the normal_dataset.csv is available."
-            )
-
-        if (
-            "Prediction" in display_df.columns
-            and display_df["Prediction"]
-            .astype(str)
-            .str.upper()
-            .eq("ANOMALY")
-            .any()
-        ):
-            st.markdown(
-                '<div class="anomaly-banner">'
-                '🔴 ANOMALY DETECTED</div>',
-                unsafe_allow_html=True
-            )
-
-        st.dataframe(
-            style_live_table(display_df),
-            use_container_width=True,
-            hide_index=True,
-            height=570
-        )
-
-    live_prediction()
-
+# SINGLE-FAULT UI DISABLED — original code retained as comments.
+# # --------------------------------------------------
+# # FAULT INJECTION
+# # --------------------------------------------------
+#
+# with left:
+#     st.subheader("⚡ Fault Injection")
+#
+#     service = st.selectbox(
+#         "Service",
+#         list(SERVICES.keys())
+#     )
+#
+#     fault_type = st.selectbox(
+#         "Fault Type",
+#         FAULT_TYPES
+#     )
+#
+#     duration = st.number_input(
+#         "Duration (seconds)",
+#         min_value=1,
+#         max_value=300,
+#         value=60,
+#         step=1
+#     )
+#
+#     delay_millis = 2000
+#     error_percent = 50
+#     cpu_millis = 100
+#     memory_mb = 50
+#     request_rate = 5
+#
+#     if fault_type == "ERROR_RATE":
+#         error_percent = st.number_input(
+#             "Error percentage",
+#             min_value=1,
+#             max_value=50,
+#             value=50
+#         )
+#
+#     elif fault_type == "CPU":
+#         cpu_millis = st.number_input(
+#             "CPU work per request (ms)",
+#             min_value=1,
+#             max_value=200,
+#             value=200
+#         )
+#
+#     elif fault_type == "RESPONSE_TIME":
+#         delay_millis = st.number_input(
+#             "Delay (ms)",
+#             min_value=1,
+#             max_value=6000,
+#             value=2000
+#         )
+#
+#     elif fault_type == "REQUEST_RATE":
+#         request_rate = st.number_input(
+#             "Request rate (requests/second)",
+#             min_value=1,
+#             max_value=20,
+#             value=10,
+#             step=1
+#         )
+#
+#     if st.button(
+#         "🔴 ENABLE FAULT",
+#         type="primary",
+#         use_container_width=True
+#     ):
+#         try:
+#             with st.spinner(
+#                 f"Enabling {fault_type} on {service}..."
+#             ):
+#                 result = enable_fault(
+#                     service,
+#                     fault_type,
+#                     duration,
+#                     error_percent,
+#                     cpu_millis,
+#                     memory_mb,
+#                     request_rate,
+#                     delay_millis
+#                 )
+#
+#             st.success(result)
+#
+#         except Exception as error:
+#             st.error(f"Fault enable failed: {error}")
+#
+#     if st.button(
+#         "↩ DISABLE FAULT",
+#         use_container_width=True
+#     ):
+#         try:
+#             with st.spinner(
+#                 f"Disabling fault on {service}..."
+#             ):
+#                 result = disable_fault(service)
+#
+#             st.success(result)
+#
+#         except Exception as error:
+#             st.error(f"Fault disable failed: {error}")
+#
+#     status = get_fault_status(service)
+#
+#     if status != "NONE" and status != "UNAVAILABLE":
+#         st.warning(
+#             f"🔴 ACTIVE FAULT — {service} — {status}"
+#         )
+#
+#     elif status == "NONE":
+#         st.success(f"🟢 {service} — NORMAL")
+#
+#     else:
+#         st.info(f"Status: {status}")
+#
+#
+#
 
 with left:
     st.divider()
@@ -776,6 +706,83 @@ with left:
         st.success(f"🟢 {combined_service_label.upper()} — NO COMBINED FAULT")
     else:
         st.info(f"Combined fault status: {combined_status}")
+
+
+# --------------------------------------------------
+# LIVE PREDICTIONS
+# --------------------------------------------------
+
+with right:
+    st.subheader("📡 Live Predictions")
+
+    @st.fragment(run_every=5)
+    def live_prediction():
+        df = read_dataset()
+
+        if df.empty:
+            st.info(
+                "No observations yet. Press START to begin "
+                "the testing pipeline."
+            )
+            return
+
+        live_df = df.tail(30).copy()
+        display_df = format_live_table(live_df)
+
+        st.caption(
+            f"Showing latest {len(display_df)} collected "
+            f"observations | Total stored in CSV: {len(df)}"
+        )
+
+        training_reference = read_training_reference()
+        prediction_figure = build_anomaly_prediction_figure(
+            training_reference,
+            df,
+            max_points=90,
+        )
+        if prediction_figure is not None:
+            st.plotly_chart(
+                prediction_figure,
+                use_container_width=True,
+                config={"displayModeBar": False},
+                key="live-anomaly-prediction-graph",
+            )
+            st.caption(
+                "Green = normal training/reference observations and NORMAL test predictions; "
+                "red = ANOMALY test predictions. The same five numeric and three service "
+                "features used by Isolation Forest are projected into two PCA dimensions. "
+                "Hover over a point for service, time and score."
+            )
+        else:
+            st.info(
+                "The anomaly scatter plot needs normal training observations. "
+                "Open Model Training and make sure the normal_dataset.csv is available."
+            )
+
+        if (
+            "Prediction" in display_df.columns
+            and display_df["Prediction"]
+            .astype(str)
+            .str.upper()
+            .eq("ANOMALY")
+            .any()
+        ):
+            st.markdown(
+                '<div class="anomaly-banner">'
+                '🔴 ANOMALY DETECTED</div>',
+                unsafe_allow_html=True
+            )
+
+        st.dataframe(
+            style_live_table(display_df),
+            use_container_width=True,
+            hide_index=True,
+            height=570
+        )
+
+    live_prediction()
+
+
 
 st.divider()
 

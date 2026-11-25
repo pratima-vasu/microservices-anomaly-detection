@@ -42,7 +42,7 @@ if not CSV_FILE.exists() or CSV_FILE.stat().st_size == 0:
         "press START, collect observations, then press STOP."
     )
     st.page_link(
-        "app.py",
+        "Prediction.py",
         label="← Back to Live Prediction",
         icon="🔴",
     )
@@ -59,7 +59,7 @@ if df.empty:
         "The test dataset is empty. Start the Live Prediction pipeline, "
         "collect normal and supported fault-injection observations, then return here."
     )
-    st.page_link("app.py", label="← Back to Live Prediction", icon="🔴")
+    st.page_link("Prediction.py", label="← Back to Live Prediction", icon="🔴")
     st.stop()
 
 required = {"actual_label", "prediction"}
@@ -238,7 +238,7 @@ st.caption(f"Stored observations: {len(df)}")
 st.divider()
 
 st.page_link(
-    "app.py",
+    "Prediction.py",
     label="← Back to Live Prediction",
     icon="🔴",
 )

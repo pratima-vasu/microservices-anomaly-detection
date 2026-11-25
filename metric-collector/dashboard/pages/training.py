@@ -152,7 +152,7 @@ def run_preparation():
 # STEP 1 — COLLECT NORMAL DATASET
 # --------------------------------------------------
 
-st.subheader("Step 1 — Collect Normal Dataset")
+st.subheader("Step 1 — Collect Training Dataset")
 
 left, right = st.columns([1, 2])
 
@@ -164,14 +164,14 @@ with left:
     )
 
     if st.button(
-        "▶ Start Normal Collection",
+        "▶ Start Training Collection",
         type="primary",
         use_container_width=True,
         disabled=is_running()
     ):
         try:
             start_collection()
-            st.success("Normal metric collection started.")
+            st.success("Training data collection started.")
 
         except Exception as exc:
             st.error(
@@ -193,7 +193,7 @@ with left:
             )
 
     if st.button(
-        "🗑 Clear Normal Dataset",
+        "🗑 Clear Training Dataset",
         use_container_width=True,
         disabled=is_running()
     ):
@@ -236,9 +236,9 @@ with left:
 with right:
 
     if is_running():
-        st.success("● NORMAL COLLECTION RUNNING")
+        st.success("● TRAINING DATA COLLECTION RUNNING")
     else:
-        st.info("● NORMAL COLLECTION STOPPED")
+        st.info("● TRAINING DATA COLLECTION STOPPED")
 
     if NORMAL_CSV.exists():
 
@@ -263,7 +263,7 @@ with right:
             )
 
             st.download_button(
-                label="⬇ Download Normal Dataset CSV",
+                label="⬇ Download Training Dataset CSV",
                 data=raw.to_csv(
                     index=False
                 ).encode("utf-8"),
@@ -280,7 +280,7 @@ with right:
 
     else:
         st.caption(
-            "No normal dataset yet. Start collection after starting "
+            "No training dataset yet. Start collection after starting "
             "all three services and Prometheus."
         )
 
@@ -291,10 +291,10 @@ with right:
 
 st.divider()
 
-st.subheader("Step 2 — Validate Normal Dataset")
+st.subheader("Step 2 — Validate Training Dataset")
 
 if st.button(
-    "✓ Validate Dataset",
+    "✓ Validate Training Dataset",
     use_container_width=False
 ):
 
@@ -464,57 +464,60 @@ if st.button(
 
 
 # --------------------------------------------------
-# CURRENT MODEL
-# --------------------------------------------------
+# CURRENT MODEL DISPLAY DISABLED — original code retained below as comments.
+# # CURRENT MODEL
+# # --------------------------------------------------
+#
+# st.divider()
+#
+# st.subheader("Current Model")
+# # Restore and display the model currently saved in TiDB.
+# from storage import restore_trained_model
+#
+# if restore_trained_model():
+#     saved = joblib.load(MODEL_FILE)
+#     metadata = saved.get("metadata", {})
+#     model = saved["model"]
+#
+#     st.success("Latest trained model restored from TiDB.")
+#     details_left, details_right = st.columns(2)
+#     with details_left:
+#         st.metric("Contamination", f"{model.contamination:.4f}")
+#         st.metric("Training rows", metadata.get("training_rows", "Not available"))
+#         st.write("**Training timestamp (UTC)**")
+#         st.code(metadata.get("training_timestamp_utc", "Not available"))
+#     with details_right:
+#         st.write("**Training dataset SHA-256**")
+#         st.code(metadata.get("dataset_sha256", "Not available"))
+#         st.write("**Features used by model**")
+#         st.write(saved.get("features", []))
+#         st.write("**scikit-learn version**")
+#         st.write(metadata.get("sklearn_version", "Not available"))
+# else:
+#     st.warning("No saved model found in TiDB.")
+# if MODEL_FILE.exists():
+#
+#     st.success(
+#         f"Model file available — "
+#         f"{MODEL_FILE.stat().st_size:,} bytes"
+#     )
+#
+# else:
+#     st.warning(
+#         "No model found at the shared model path. "
+#         "Train a model before starting live prediction."
+#     )
+#
+#
+# # --------------------------------------------------
+#
 
-st.divider()
-
-st.subheader("Current Model")
-# Restore and display the model currently saved in TiDB.
-from storage import restore_trained_model
-
-if restore_trained_model():
-    saved = joblib.load(MODEL_FILE)
-    metadata = saved.get("metadata", {})
-    model = saved["model"]
-
-    st.success("Latest trained model restored from TiDB.")
-    details_left, details_right = st.columns(2)
-    with details_left:
-        st.metric("Contamination", f"{model.contamination:.4f}")
-        st.metric("Training rows", metadata.get("training_rows", "Not available"))
-        st.write("**Training timestamp (UTC)**")
-        st.code(metadata.get("training_timestamp_utc", "Not available"))
-    with details_right:
-        st.write("**Training dataset SHA-256**")
-        st.code(metadata.get("dataset_sha256", "Not available"))
-        st.write("**Features used by model**")
-        st.write(saved.get("features", []))
-        st.write("**scikit-learn version**")
-        st.write(metadata.get("sklearn_version", "Not available"))
-else:
-    st.warning("No saved model found in TiDB.")
-if MODEL_FILE.exists():
-
-    st.success(
-        f"Model file available — "
-        f"{MODEL_FILE.stat().st_size:,} bytes"
-    )
-
-else:
-    st.warning(
-        "No model found at the shared model path. "
-        "Train a model before starting live prediction."
-    )
-
-
-# --------------------------------------------------
 # COLLECTION LOG
 # --------------------------------------------------
 
 if LOG_FILE.exists():
 
-    with st.expander("Normal collection log"):
+    with st.expander("Training collection log"):
 
         st.code(
             LOG_FILE.read_text(
@@ -529,6 +532,6 @@ if LOG_FILE.exists():
 # --------------------------------------------------
 
 st.page_link(
-    "app.py",
+    "Prediction.py",
     label="← Back to Live Prediction"
 )
