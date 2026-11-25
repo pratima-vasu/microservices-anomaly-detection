@@ -648,7 +648,7 @@ with left:
 
     if combined_type == "CPU+RESPONSE_TIME":
         combined_cpu = st.number_input(
-            "CPU work per request (ms)", min_value=1, max_value=200, value=100,
+            "CPU work per request (ms)", min_value=1, max_value=200, value=200,
             key="combined_cpu"
         )
         combined_delay = st.number_input(
