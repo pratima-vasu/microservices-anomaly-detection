@@ -239,7 +239,7 @@ def service_health(base_url):
 #     return r.text
 #
 #
-#def enable_combined_fault(service, combination, duration, delay_millis, cpu_millis, error_percent, thread_count, request_rate):
+def enable_combined_fault(service, combination, duration, delay_millis, cpu_millis, error_percent, thread_count, request_rate):
     payload = {
         "combination": combination,
         "durationSeconds": int(duration),
