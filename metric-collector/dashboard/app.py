@@ -47,6 +47,11 @@ st.markdown("""
 .service-up {color:#167545;font-size:17px;font-weight:800;}
 .service-down {color:#b42318;font-size:17px;font-weight:800;}
 .anomaly-banner {border:1px solid #ff4b4b;border-radius:9px;padding:8px 12px;color:#ff8f8f;background:rgba(255,50,50,.08);font-weight:700;}
+/* Keep the previous live-dashboard view at full opacity while a fragment refreshes. */
+.stElementContainer[data-stale="true"] {
+    opacity: 1 !important;
+    filter: none !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -330,6 +335,22 @@ def format_live_table(df):
     }
 
     out = df[columns].copy()
+
+    # Convert stored UTC timestamps to IST for dashboard display only.
+    # The original CSV and TiDB timestamps remain unchanged.
+    if "timestamp" in out.columns:
+        timestamps = pd.to_datetime(
+            out["timestamp"],
+            errors="coerce",
+            utc=True
+        )
+        out["timestamp"] = (
+            timestamps
+            .dt.tz_convert("Asia/Kolkata")
+            .dt.strftime("%d-%b-%Y %I:%M:%S %p")
+        )
+
+    labels["timestamp"] = "Time (IST)"
     out.rename(columns=labels, inplace=True)
 
     return out
